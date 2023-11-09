@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat May 13 07:56:59 2023
+
+@author: bcourtne
+
+
+fit UD diameters for pionier, gravity and matisse data 
+
+-for each instrument 
+make a wvl grid 
+get V2 V2err and interpolate onto grid 
+get unique baselines 
+put in dataframe 
+
+-merge all dataframes to one master 
+
+- fit UD models per wavelength,
+
+To Do 
+===
+- new scripts for Fitting Unresolved Binary (2 parameters) 
+
+
+Fitting MC simulation of resolved binary (set R* at UD and fit F, P, R2) 
+
+
+
+
+
+"""
+import glob
+import numpy as np
+import pandas as pd 
+import pyoifits as oifits
+from scipy.interpolate import interp1d
+from scipy import special
+import matplotlib.pyplot as plt 
+from scipy.optimize import minimize
+import emcee
+import corner
+from matplotlib import colors
+
+def baseline2uv_matrix( h, d):
+    """
+    
+
+    Parameters
+    ----------
+    Not used wvl : TYPE  need to divide by this later
+        DESCRIPTION. wavelength (m)
+    h : TYPE
+        DESCRIPTION. target hour angle (radian)
+    d : TYPE
+        DESCRIPTION. declination of target (radian)
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    #from https://web.njit.edu/~gary/728/Lecture6.html
+    
+    # https://www.icrar.org/wp-content/uploads/2018/11/Perley_Basic_Radio_Interferometry_Geometry.pdf
+    #wvl in m
+    #location should be tuple of (latitude, longitude) coordinates degrees 
+    #telescope coordinates should be astropy.coordinates  SkyCoord class
+    
+    #hour angle (radian)
+    #h = ( get_LST( location,  datetime ) - telescope_coordinates.ra ).radian #radian
+    
+    # convert dec to radians also
+    #d = telescope_coordinates.dec.radian #radian
+    
+    mat =  np.array([[np.sin(h), np.cos(h), 0],\
+           [-np.sin(d)*np.cos(h), np.sin(d)*np.sin(h), np.cos(d)],\
+           [np.cos(d)*np.cos(h), -np.cos(d)*np.sin(h), np.sin(d) ]] )
+        
+    return(mat)   
+
+
+
+def disk_v2(rho, theta):
+    #rho = B/wvl (m/m), theta is angular diamter (radians)
+    v2 = ( 2*special.j1( np.pi*rho*theta ) / (np.pi*rho*theta) )**2 
+    return v2
+
+def log_likelihood(theta, x, y, yerr):
+    phi  = theta 
+    model = disk_v2(x, phi)
+    sigma2 = yerr**2  #+ model**2 * np.exp(2 * log_f)
+    return( -0.5 * np.sum((y - model) ** 2 / sigma2 ) )#+ np.log(sigma2)) )
+
+
+def log_prior(theta):
+    phi = theta 
+    if 0 < phi < mas2rad(500):# and -10.0 < log_f < 1.0:
+        return 0.0
+    else:
+        return -np.inf
+
+
+def log_probability(theta, x, y, yerr):
+    lp = log_prior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    else:
+        return lp + log_likelihood(theta, x, y, yerr)
+    
+    
+def binary_v2(rho, v_1, v_2,r,dS): #https://hal.archives-ouvertes.fr/hal-01221306/document
+    v2 = (v_1**2 + (r*v_2)**2 + (2*r*abs(v_1)*abs(v_2)*np.cos(2*np.pi*dS*rho) ) ) / (1+r**2)
+    return v2
+
+
+def chi2(y_model,y_true,yerr):
+    return(sum( (y_model-y_true)**2/yerr**2 ) )
+
+    
+def rad2mas(rad):
+    return(rad*180/np.pi * 3600 * 1e3)
+
+def mas2rad(mas):
+    return(mas*np.pi/180 / 3600 / 1e3)
+
+def fit_prep(files, EXTVER=None,flip=True):    
+    # pionier data is [wvl, B], while gravity is [B,wvl ] (so gravity we want flip =Tue)              
+    
+    if EXTVER==None:
+        wvl_EXTNAME = 'OI_WAVELENGTH'
+        v2_EXTNAME = 'OI_VIS2'
+    
+    else:
+        wvl_EXTNAME = ('OI_WAVELENGTH',EXTVER)
+        v2_EXTNAME = ('OI_VIS2',EXTVER)
+        
+    hdulists = [oifits.open(f) for f in files]
+    
+    wvls = [ h[wvl_EXTNAME].data['EFF_WAVE'] for h in hdulists]
+    wvl_grid = np.median( wvls , axis=0) # grid to interpolate wvls 
+    
+    data_dict = {} 
+    for ii, h in enumerate( hdulists ):
+        
+        file = files[ii].split('/')[-1]
+        
+        #B = np.sqrt(h[v2_EXTNAME].data['UCOORD']**2 + h[v2_EXTNAME].data['VCOORD']**2)
+        
+        dec = np.deg2rad(h[0].header['DEC'])
+        ha = np.deg2rad( h[0].header['LST']/60/60 )
+        B = [] # to holdprojected baseline !
+        for Bx,By in zip( h['OI_VIS2'].data['UCOORD'],h['OI_VIS2'].data['VCOORD'] ): # U=east-west , V=north-sout
+            #lambda_u, lambda_v, _ = baseline2uv_matrix(ha, dec) @ np.array( [Bx,By,0] ) # lambda_u has to be multiplied by lambda to get u±!!!
+            #B.append( np.sqrt( lambda_u**2 + lambda_v**2 ) ) # projected baseline !
+            B.append( (Bx**2 + By**2)**0.5 )
+        v2_list = []
+        v2err_list = []
+        dwvl = []
+        obs_time = []
+        if not flip:
+            for b in range(len(B)):
+                
+                interp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2DATA'][b,:] ,fill_value =  "extrapolate" )
+                
+                dwvl.append( np.max( 1e9 * ( abs( h[wvl_EXTNAME].data['EFF_WAVE'] -  wvl_grid ) ) ) )
+                
+                obs_time.append( [h[0].header['DATE-OBS'],h[0].header['LST']] ) 
+                
+                
+                v2_list.append( interp_fn( wvl_grid ) )
+                
+                interp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2ERR'][b,:] ,fill_value =  "extrapolate" )
+                
+                v2err_list.append( interp_fn( wvl_grid ) )
+                
+            print('max wvl difference in interpolatation for {} = {}nm'.format(file, np.max(dwvl)))
+            
+            v2_df = pd.DataFrame( v2_list , columns =wvl_grid , index = B )
+            
+            v2err_df = pd.DataFrame( v2err_list , columns = wvl_grid , index = B)
+            
+            time_df = pd.DataFrame( obs_time , columns = ['DATE-OBS','LST'] , index = B)
+            
+            data_dict[file] = {'v2':v2_df, 'v2err':v2err_df, 'obs':time_df}
+            
+            v2_df = pd.concat( [data_dict[f]['v2'] for f in data_dict] , axis=0)
+            v2err_df = pd.concat( [data_dict[f]['v2err'] for f in data_dict] , axis=0)
+            obs_df = pd.concat( [data_dict[f]['obs'] for f in data_dict] , axis=0)
+
+        else: # for graivty we have to flip 
+            for i in range( len(B) ):
+                
+                interp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2DATA'].T[:,i] ,fill_value =  "extrapolate" )
+                
+                dwvl.append( np.max( 1e9 * ( abs( h[wvl_EXTNAME].data['EFF_WAVE'] -  wvl_grid ) ) ) )
+                
+                obs_time.append( [h[0].header['DATE-OBS'],h[0].header['LST']] )
+                
+                v2_list.append( interp_fn( wvl_grid ) )
+                
+                interp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2ERR'].T[:,i] ,fill_value =  "extrapolate" )
+                
+                v2err_list.append( interp_fn( wvl_grid ) )
+             
+            print('max wvl difference in interpolatation for {} = {}nm'.format(file, np.max(dwvl)))
+            
+            v2_df = pd.DataFrame( v2_list , columns =wvl_grid , index = B )
+            
+            v2err_df = pd.DataFrame( v2err_list , columns = wvl_grid , index = B)
+            
+            time_df = pd.DataFrame( obs_time , columns = ['DATE-OBS','LST'] , index = B)
+            
+            
+            data_dict[file] = {'v2':v2_df, 'v2err':v2err_df, 'obs':time_df}
+            
+            v2_df = pd.concat( [data_dict[f]['v2'] for f in data_dict] , axis=0)
+            v2err_df = pd.concat( [data_dict[f]['v2err'] for f in data_dict] , axis=0)
+            obs_df = pd.concat( [data_dict[f]['obs'] for f in data_dict] , axis=0)
+        
+    return( v2_df , v2err_df , obs_df)
+
+
+pionier_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+
+
+gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+
+matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#[ h[i].header['EXTNAME'] for i in range(1,8)]
+
+
+pion_v2_df , pion_v2err_df ,  pion_obs_df = fit_prep(pionier_files,flip=True)
+
+grav_p1_v2_df , grav_p1_v2err_df, grav_p1_obs_df = fit_prep(gravity_files, EXTVER = 11 ,flip=True)
+grav_p2_v2_df , grav_p2_v2err_df , grav_p2_obs_df = fit_prep(gravity_files, EXTVER = 12 ,flip=True)
+
+mati_L_v2_df , mati_L_v2err_df , mati_L_obs_df = fit_prep(matisse_files_L ,flip=True)
+mati_N_v2_df , mati_N_v2err_df , mati_N_obs_df = fit_prep(matisse_files_N ,flip=True)
+
+
+
+#%% 
+
+# filters 
+grav_B_filt = grav_p1_v2_df.index.values !=0 
+grav_wvl_filt = (grav_p1_v2_df.columns > 1.9e-6) & (grav_p1_v2_df.columns < 2.4e-6)
+
+# matisse wvl limits from https://www.eso.org/sci/facilities/paranal/instruments/matisse.html
+mat_L_wvl_filt = (mati_L_v2_df.columns > 3.2e-6) & (mati_L_v2_df.columns < 3.9e-6) #| (mati_L_v2_df.columns > 4.5e-6) 
+mat_M_wvl_filt = (mati_L_v2_df.columns > 4.5e-6) &  (mati_L_v2_df.columns <= 5e-6)
+mat_N_wvl_filt = (mati_N_v2_df.columns > 8e-6) & (mati_N_v2_df.columns <= 13e-6)#| (mati_L_v2_df.columns > 4.5e-6)
+
+# instrument vis tuples 
+pion_tup = (pion_v2_df , pion_v2err_df)
+grav_p1_tup = (grav_p1_v2_df[grav_p1_v2_df.columns[::50]][grav_B_filt] , grav_p1_v2err_df[grav_p1_v2_df.columns[::50]][grav_B_filt] )
+grav_p2_tup = (grav_p2_v2_df[grav_p2_v2_df.columns[::50]][grav_B_filt] , grav_p2_v2err_df[grav_p2_v2_df.columns[::50]][grav_B_filt] )
+mati_L_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] )
+mati_M_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] )
+mati_N_tup = (mati_N_v2_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] , mati_N_v2err_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] )
+
+
+ins_vis_dict = {'Pionier (H)':pion_tup, 'Gravity P1 (K)' : grav_p1_tup, \
+                'Gravity P2 (K)' : grav_p2_tup, 'Matisse (L)':mati_L_tup,\
+                    'Matisse (M)':mati_M_tup, 'Matisse (N)':mati_N_tup }
+
+#v2_df, v2err_df = pion_v2_df , pion_v2err_df
+
+#grav_B_filt = grav_p1_v2_df.index.values !=0  #sometimes we get zero baseline in data that screws things up
+#grav_wvl_filt = (grav_p1_v2_df.columns > 1.9e-6) & (grav_p1_v2_df.columns < 2.4e-6) # e.g.
+#v2_df, v2err_df = grav_p1_v2_df[grav_p1_v2_df.columns[::50]][grav_B_filt] , grav_p1_v2err_df[grav_p1_v2_df.columns[::50]][grav_B_filt]
+#v2_df, v2err_df = grav_p2_v2_df[grav_p2_v2_df.columns[::50]][grav_B_filt] , grav_p2_v2err_df[grav_p2_v2_df.columns[::50]][grav_B_filt]
+
+#mat_L_wvl_filt = (mati_L_v2_df.columns < 4.1e-6) | (mati_L_v2_df.columns > 4.5e-6) # e.g.
+#v2_df, v2err_df = mati_L_v2_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]]
+
+#mat_N_wvl_filt = (mati_N_v2_df.columns > 8e-6) #| (mati_L_v2_df.columns > 4.5e-6) # e.g.
+#v2_df, v2err_df = mati_N_v2_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] , mati_N_v2err_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]]
+
+
+
+    
+ud_fit_per_ins = {} # to hold fitting results per instrument photometric band
+
+for ins in ins_vis_dict:
+    
+    print(f'\n\n\n fitting {ins} visibility data to UD model\n\n\n')
+    # get the current instrument visibilities
+    v2_df, v2err_df = ins_vis_dict[ins]
+    
+    ud_fit_results = {}
+    
+    redchi2 = []
+    diam_mean= []
+    diam_median= []
+    diam_err= []
+    
+    intermediate_results_dict = {}
+    
+    for wvl_indx, wvl in enumerate( v2_df.columns ):
+        
+        intermediate_results_dict[wvl] = {} #{'rho':[], 'v2_obs':[], 'v2_obs_err':[],\'v2_model':[],'samplers':[] }
+        
+        rho = v2_df.index.values / wvl # B/wvl (angular freq , rad^-1)
+        v2 = v2_df[wvl].values  # |V|^2
+        v2_err = v2err_df[wvl].values # uncertainty 
+        
+        # filter out unphysical V2 values 
+        v2_filt = (v2>0) & (v2<1.1)
+        
+        # short hand model notation 
+        x, y, yerr = rho[v2_filt] , v2[v2_filt], v2_err[v2_filt]
+    
+        """
+        plt.figure()
+        plt.semilogy( [ -log_likelihood(mas2rad(i), x, y, yerr) for i in range(10) ] )
+        
+        np.random.seed(42)
+        nll = lambda *args: -log_likelihood(*args)
+        initial = np.array([ mas2rad(5) ]) #, np.log(0.1)]) #+ 0.1 * np.random.randn(2)
+        soln = minimize(nll, initial, args=(x, y, yerr),tol=mas2rad(0.1))
+        """
+        
+        
+        
+        #pos = soln.x + 1e-4 * np.random.randn(32, 3)
+        #pos = [mas2rad(5)]
+        #nwalkers, ndim = 32,1
+        
+        nwalkers = 50 #32
+        ndim = 1
+        # quick grid search 
+        theta_grid = np.linspace(mas2rad(1),mas2rad(20),20)
+        p0_mean = theta_grid[np.argmin( [np.sqrt( np.sum( abs(disk_v2(x, theta) - y)**2 ) ) for theta in theta_grid ] ) ]
+        p0 = p0_mean + mas2rad(p0_mean/2) * np.random.rand(nwalkers, 1)
+        
+        sampler = emcee.EnsembleSampler(
+            nwalkers, ndim, log_probability, args=( x, y, yerr )
+        )
+        sampler.run_mcmc(p0, 1000, progress=True);
+        
+        #samples = sampler.get_chain(flat=True)
+        
+        #plt.hist(np.log10(samples) ) , bins = np.logspace(-9,-7,100)) #[-1,:,0])
+        
+        #plt.hist( np.log10( samples ) , bins=np.linspace(-9,-5,100 ))
+        
+        flat_samples = sampler.get_chain(discard=100, thin=15, flat=True)
+        
+    
+        
+        """
+        plt.figure()
+        labels = [r'$\theta$ (mas)']
+        
+        fig = corner.corner(
+            rad2mas(flat_samples), labels=labels
+        );"""
+        #plt.savefig('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/disk_diam_hist_example.png')
+    
+        
+        """plt.figure() 
+        plt.errorbar(v2_df.columns, v2_df.iloc[wvl_indx], yerr= v2err_df.iloc[wvl_indx], linestyle=' ')
+        plt.xlabel('Baseline (m)')
+        plt.ylabel(r'$V^2$')
+        plt.plot(v2_df.columns,  disk_v2( rho, np.mean( rad2mas( flat_samples[:, :] ) ) *1e-3 * np.pi/180 / 3600  ) ,'.')
+        """
+        
+        #y_model = np.median( rad2mas( flat_samples[:, :] ) ) * 1e-3 * np.pi/180 / 3600
+        
+        
+        mcmc = np.percentile(flat_samples[:, 0], [16, 50, 84])
+        q = np.diff(mcmc)
+        
+        diam_mean.append( rad2mas( np.mean(  flat_samples[:, :] ) ))
+        diam_median.append( rad2mas( mcmc[1] ))
+        diam_err.append( rad2mas(q) )
+        
+        """
+        fig1 = plt.figure(1)
+        #Plot Data-model
+        frame1=fig1.add_axes((.1,.3,.8,.6))
+        fig1.set_tight_layout(True)
+        plt.errorbar(v2_df.columns, v2_df.iloc[wvl_indx], yerr= v2err_df.iloc[wvl_indx], linestyle=' ',color='darkred',alpha=0.6,label='measured')
+        plt.plot(v2_df.columns,  disk_v2( rho, mas2rad(diam_median[-1])  ) ,'.',color='darkblue',alpha=0.6, label='model')
+        plt.ylabel(r'$V^2$', fontsize=15)
+        plt.gca().tick_params(labelsize=13)
+        plt.legend(fontsize=15)
+        frame2=fig1.add_axes((.1,.1,.8,.2))    
+          
+        plt.plot(v2_df.columns, ((y-y_model.values)/yerr),'o',color='k')
+        plt.axhline(0,color='g',linestyle='--')
+        plt.ylabel(r'$\chi_i$',fontsize=15 ) #r'$\Delta V^2 /\sigma_{V2}$',fontsize=15)
+        plt.gca().tick_params(labelsize=13)
+        plt.xlabel('Baseline (m)',fontsize=15)"""
+        
+        #best fit
+        y_model = disk_v2( x, mas2rad(diam_median[-1] ) ) 
+        
+      
+        intermediate_results_dict[wvl]['rho'] = x
+        intermediate_results_dict[wvl]['v2_obs'] = y
+        intermediate_results_dict[wvl]['v2_obs_err'] = yerr
+        intermediate_results_dict[wvl]['v2_model'] = y_model
+        intermediate_results_dict[wvl]['samplers'] = flat_samples
+        
+        redchi2.append(chi2(y_model  , y, yerr) / (len(v2_df[wvl])-1))
+        
+        #reduced chi2 
+        #redchi2.append(chi2(y_model  , y, yerr) / (len(v2_df.iloc[wvl_indx])-1))
+        
+        print('reduced chi2 = {}'.format(chi2(y_model, y, yerr) / (len(v2_df[wvl])-1)) )
+    
+    
+    ud_fit_results['diam_mean'] = diam_mean
+    ud_fit_results['diam_median'] = diam_median
+    ud_fit_results['diam_err'] = diam_err
+    ud_fit_results['redchi2'] = redchi2
+    
+    ud_fit_results['intermediate_results'] = intermediate_results_dict
+    
+    ud_fit_per_ins[ins] = ud_fit_results
+
+"""
+#save a summary table
+ud_table = {'wvl_list':[],'ud_mean':[], 'ud_err':[],'ud_redchi2':[]} 
+for ins in ud_fit_per_ins:
+    ud_table['wvl_list'].append( list( ud_fit_per_ins[ins]['intermediate_results'].keys() ) )
+    ud_table['ud_mean'].append( ud_fit_per_ins[ins]['diam_mean'] )
+    ud_table['ud_err'].append( ud_fit_per_ins[ins]['diam_err']  ) 
+    ud_table['ud_redchi2'].append( ud_fit_per_ins[ins]['redchi2']  ) 
+    
+for k in ud_table:
+    ud_table[k] = [item for sublist in ud_table[k] for item in sublist]
+
+ud_table = pd.DataFrame( ud_table )
+ud_table=ud_table.set_index('wvl_list')
+#ud_table.to_csv('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/UD_fit.csv')
+"""
+#%% Plot UD results 
+fig1 = plt.figure(1,figsize=(10,8))
+fig1.set_tight_layout(True)
+
+frame1=fig1.add_axes((.1,.3,.8,.6))
+frame2=fig1.add_axes((.1,.05,.8,.2))   
+
+
+#for ins, col in zip(ud_fit_per_ins, ['b','slateblue','darkslateblue','deeppink','orange','red']):
+for ins, col in zip(ud_fit_per_ins, ['b','slateblue','darkslateblue','deeppink','orange','red']):
+    if 1: #ins!='Matisse (N)':
+        wvl_grid = np.array( list( ud_fit_per_ins[ins]['intermediate_results'].keys() ) )
+        diam_median = ud_fit_per_ins[ins]['diam_median']
+        diam_err = ud_fit_per_ins[ins]['diam_err']
+        redchi2 = ud_fit_per_ins[ins]['redchi2']
+        
+        # plot it
+        frame1.errorbar(1e6*wvl_grid, diam_median, yerr=np.array(diam_err).T, color = col, fmt='-o', lw = 2, label = ins)
+        frame1.set_yscale('log')
+        plt.semilogy(1e6*wvl_grid, redchi2, '-',lw=2, color=col)
+
+
+fontsize=20
+frame1.set_title('RT Pav Uniform Disk Fit vs Wavelength')
+frame1.grid()
+frame1.legend(fontsize=fontsize)
+frame1.set_ylabel(r'$\theta$ [mas]',fontsize=fontsize)
+frame1.tick_params(labelsize=fontsize)
+frame1.set_xticklabels([]) 
+
+frame2.grid()
+frame2.set_xlabel(r'wavelength [$\mu m$]',fontsize=fontsize)
+frame2.set_ylabel(r'$\chi^2_\nu$',fontsize=fontsize)
+frame2.tick_params(labelsize=fontsize)
+
+plt.tight_layout()
+#plt.savefig('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/FIT_UDs_logscale.pdf',bbox_inches='tight')
+
+#plt.title('RT Pav\nuniform disk diameter')
+
+def plot_sampler(ins, wvl ,fontsize=14, xlabel=r'$\theta$ [mas]'):
+    
+    plt.figure()
+    plt.title(f'MCMC Uniform Disk fit')
+    plt.hist( rad2mas(ud_fit_per_ins[ins]['intermediate_results'][wvl]['samplers']),\
+             label=f'{ins} at {round(1e6*wvl,3)}um',histtype='step',color='k',lw=3 )
+    plt.legend(fontsize=fontsize)
+    plt.xlabel(xlabel,fontsize=fontsize)
+    plt.gca().tick_params(labelsize=fontsize)
+    plt.show()
+    
+
+ins = list( ud_fit_per_ins.keys() )[3] 
+wvls =  list( ud_fit_per_ins[ins]['intermediate_results'].keys() ) 
+plot_sampler(ins, wvls[3] , xlabel=r'$\theta$ [mas]')
+
+
+
+#%%
+
+
+
+
+
+
+
+
+
