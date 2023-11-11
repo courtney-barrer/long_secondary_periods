@@ -167,56 +167,6 @@ def binary_V(u, v, dRA, dDEC, F , ud, R=None):
 
 
 
-def binary_bispectrum(u_mat, v_mat, wvls, dRA, dDEC, F , ud, R=None):
-    """
-    
-
-    Parameters
-    ----------
-    u_mat : TYPE, list of lists
-        DESCRIPTION. u coordinates = B_y/wvl, where B_y is projected baseline vector to the East, units = rad^-1, 
-        rows correspond to baselines, columns to wavelength
-    v_mat : TYPE, list of lists
-        DESCRIPTION. v coordinate = B_x/wvl, where B_x is projected baseline vector to the North, units = rad^-1
-        rows correspond to baselines, columns to wavelength
-    wvls : TYPE, array like
-        DESCRIPTION. wavelengths of observations 
-    dRA : TYPE. float 
-        DESCRIPTION. RA seperation between companion and primary, units = rad
-    dDEC : TYPE. float 
-        DESCRIPTION. DEC seperation between companion and primary, units = rad
-    F : TYPE. float 
-        DESCRIPTION. Flux ratio (companion/primary)
-    ud : TYPE. float 
-        DESCRIPTION. Uniform disk diameter of primary, units = rad
-    R : TYPE, optional
-        DESCRIPTION. spectral resolution of observation to calculate bandwidth smearing correction factor. The default is None.
-
-    Returns
-    -------
-    triangles, bispectrum.
-        triangles is a dictionary with wavelength key holding baseline coordinates (vertices) that form the triangle
-        bispectrum is a dictionary with wavelength key holding the bispectrum for each respective triangle (should be ordered the same between triangle and bispectrum dictionary)
-
-    """
-    
-    bispectrum={}  
-    triangles={}
-    for i,w in enumerate( wvls ): 
-        # fun fact: number of triangles from n points is n*(n-1)*(n-2)/6 ! 
-        
-        utmp = u_mat[:,i]
-        vtmp = v_mat[:,i]
-        Bcoord_at_wvl = list( w * np.array( [utmp, vtmp] ).T )
-        V_binary_at_wvl = binary_V(utmp, vtmp, dRA, dDEC, F , ud, R=R)
-        
-        B_triangles = itertools.combinations(Bcoord_at_wvl, 3) 
-        V_triangles = itertools.combinations(V_binary_at_wvl, 3) 
-        
-        bispectrum[w] = [v[0]*v[1]*np.conjugate(v[2]) for v in V_triangles]  
-        triangles[w] = list( B_triangles ) 
-        
-    return( triangles, bispectrum )
   
 
 def binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F , ud, R=None):
@@ -288,10 +238,10 @@ def binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F
         for i in range(triangle_matrix.shape[0]):
             for j in range(triangle_matrix.shape[1]):
                 V_triangle[i,j] = binary_V(u = triangle_matrix[i,j][0], v = triangle_matrix[i,j][1],  dRA=dRA, dDEC=dDEC, F=F, ud=ud,R=R)
-        # [ V(u1,v1)_0, V(u2,v2)_0, V(u3,v3)_0 ... V(u1,v1)_N, V(u2,v2)_N, V(u3,v3)_N ]
-
-        # put to original shape
-        #V_triangle = V_triangle.reshape(triangles.shape)
+        # format:
+        # triangle 0 | V(u1,v1)_0, V(u2,v2)_0, V(u3,v3)_0 |
+        #   ...      |                ...              | 
+        # triangle N | V(u1,v1)_N, V(u2,v2)_N, V(u3,v3)_N | etc
         
         # now calculate the bispectrum for each triangles in our wavelength bin
         bispectrum[w] = [v[0]*v[1]*np.conjugate(v[2]) for v in V_triangle  ]
@@ -314,6 +264,8 @@ def get_trianlge_baselines_from_telescope_coordinates( tel_x, tel_y ):
     B_y_3 = -B_y_12[:,0] - B_y_12[:,1] 
     B_y = np.hstack([B_y_12, B_y_3.reshape(-1,1)]) # our three baselines in the triangle (y component)
     
+    if np.any( np.sum( B_x , axis=1) ) or np.any( np.sum( B_y , axis=1) ):
+        raise TypeError('baselines x and/or y components do no sum to zero in at least one of the telescope triangles')
     return(B_x, B_y)
 
 
@@ -456,13 +408,13 @@ def get_baseline_lengths_from_traingles(triangles):
 
 
 # now how to prep data to fit  - I just need u_mat, v_mat from data , and corresponding to CP...
-"""
-indx2station = {h['OI_ARRAY'].data['STA_INDEX'][i]:h['OI_ARRAY'].data['STA_NAME'][i] for i in range(len(h['OI_ARRAY'].data['STA_NAME']))}
-stations = [[indx2station[h['OI_T3'].data['STA_INDEX'][tri][tel]] for tel in range(3)] for tri in range(4)]  
-h['OI_T3'].data['U1COORD '] , h['OI_T3'].data['U2COORD '] # but why is there only 2 for u and v?? 
+
+#indx2station = {h['OI_ARRAY'].data['STA_INDEX'][i]:h['OI_ARRAY'].data['STA_NAME'][i] for i in range(len(h['OI_ARRAY'].data['STA_NAME']))}
+#stations = [[indx2station[h['OI_T3'].data['STA_INDEX'][tri][tel]] for tel in range(3)] for tri in range(4)]  
+#h['OI_T3'].data['U1COORD '] , h['OI_T3'].data['U2COORD '] # but why is there only 2 for u and v?? 
 # u3 = -u1-u2 !! closing triangle!!
 
-def fit_prep(files, EXTVER=None,flip=True):    
+def fit_prep(files, EXTVER=None):    
     # pionier data is [wvl, B], while gravity is [B,wvl ] (so gravity we want flip =Tue)              
     
     if EXTVER==None:
@@ -490,6 +442,8 @@ def fit_prep(files, EXTVER=None,flip=True):
                 
         dec = np.deg2rad(h[0].header['DEC'])
         ha = np.deg2rad( h[0].header['LST']/60/60 )
+        
+        # Baselines
         B = [] # to holdprojected baseline !
         for Bx,By in zip( h['OI_VIS2'].data['UCOORD'],h['OI_VIS2'].data['VCOORD'] ): # U=east-west , V=north-sout
             #lambda_u, lambda_v, _ = baseline2uv_matrix(ha, dec) @ np.array( [Bx,By,0] ) # lambda_u has to be multiplied by lambda to get u±!!!
@@ -497,6 +451,7 @@ def fit_prep(files, EXTVER=None,flip=True):
             B.append( (Bx,By) ) # projected baseline !
         #B = [(a,b) for a,b in zip(lambda_u, lambda_v) ] # projected baseline ! #(h[v2_EXTNAME].data['UCOORD'], h[v2_EXTNAME].data['VCOORD']) #np.sqrt(h[v2_EXTNAME].data['UCOORD']**2 + h[v2_EXTNAME].data['VCOORD']**2)
         
+        # squared visibilities
         v2_list = []
         v2err_list = []
         flag_list = []
@@ -524,6 +479,7 @@ def fit_prep(files, EXTVER=None,flip=True):
           
         print('max wvl difference in interpolatation for {} = {}nm'.format(file, np.max(dwvl)))
         
+        
         # Put these in dataframes 
         v2_df = pd.DataFrame( v2_list , columns = wvl_grid , index = B )
         
@@ -545,21 +501,257 @@ def fit_prep(files, EXTVER=None,flip=True):
 
            
     return( v2_df , v2err_df , flag_df,  obs_df)
-"""
+
+
+
+pionier_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+
+
+gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+
+matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#[ h[i].header['EXTNAME'] for i in range(1,8)]
+
+
+
+
+
+def CP_prep(files,EXTVER=None):
+    
+    if EXTVER==None:
+        wvl_EXTNAME = 'OI_WAVELENGTH'
+        T3_EXTNAME = 'OI_T3'
+    
+    else:
+        wvl_EXTNAME = ('OI_WAVELENGTH',EXTVER)
+        T3_EXTNAME = ('OI_T3',EXTVER)
+    
+    hdulists = [oifits.open(f) for f in files]
+    
+    print( len( hdulists) ,'\n\n\n')
+    wvls = [ h[wvl_EXTNAME].data['EFF_WAVE'] for h in hdulists]
+    wvl_grid = np.median( wvls , axis=0) # grid to interpolate wvls 
+    
+    data_dict = {} 
+    for ii, h in enumerate( hdulists ):
+        
+        file = files[ii].split('/')[-1]
+        print(f'looking at file {ii}/{len(hdulists)}, which is \n {file} \n')
+            
+        dec = np.deg2rad( h[0].header['DEC'] )
+        ha = np.deg2rad( h[0].header['LST']/60/60 )
+                
+        Uc1 = h[T3_EXTNAME ].data['U1COORD'] # East
+        Vc1 = h[T3_EXTNAME ].data['V1COORD'] # North
+        Vc2 = h[T3_EXTNAME ].data['V2COORD']
+        Uc2 = h[T3_EXTNAME ].data['U2COORD']
+        
+        B_triangle = [] # to holdprojected baseline !
+        for By1,Bx1, By2, Bx2 in zip( Uc1,Vc1, Uc2, Vc2 ):
+            B_triangle.append([(By1,Bx1), (By2,Bx2)])
+
+        # CP 
+        CP_list = []
+        CPerr_list = []
+        flag_list = []
+        dwvl = []
+        obs_time = []
+        
+        for T in range(len(B_triangle)):
+            #for each baseline make interpolation functions 
+            CPInterp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[T3_EXTNAME].data['T3PHI'][T,:] ,kind='linear', fill_value =  "extrapolate" )
+            
+            CPerrInterp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[T3_EXTNAME].data['T3PHIERR'][T,:] ,kind='linear', fill_value =  "extrapolate" )
+            
+            FlagInterp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[T3_EXTNAME].data['FLAG'][T,:] ,kind='nearest', fill_value =  "extrapolate" )
+        
+            dwvl.append( np.max( [1e9 * ( abs( ww -  wvl_grid ) ) for ww in h[wvl_EXTNAME].data['EFF_WAVE'] ] ) )
+            
+            obs_time.append( [h[0].header['DATE-OBS'],h[0].header['LST']/60/60 ,h[0].header['RA'], h[0].header['DEC'] ] )   #LST,ec,ra should be in deg#
+            
+            CP_list.append(  CPInterp_fn ( wvl_grid ) )
+            
+            CPerr_list.append( CPerrInterp_fn ( wvl_grid ) )
+            
+            flag_list.append( FlagInterp_fn( wvl_grid ) )
+        
+        # Put these in dataframes 
+        
+        # multi index in df. (u1, v1, u2, v2)
+        index = pd.MultiIndex.from_tuples([(p1[0],p1[1], p2[0], p2[1]) for p1, p2 in B_triangle], names=["u1", "v1","u2","v2"])
+        
+        CP_df = pd.DataFrame( CP_list , columns = wvl_grid , index = index )
+        
+        CPerr_df = pd.DataFrame( CPerr_list , columns = wvl_grid , index = index)
+        
+        time_df = pd.DataFrame( obs_time , columns = ['DATE-OBS','LST', 'RA','DEC'] , index = index)
+        
+        flag_df = pd.DataFrame( np.array(flag_list).astype(bool) , columns = wvl_grid , index = index )
+        
+        data_dict[file] = {'CP':CP_df, 'CPerr':CPerr_df, 'flags' : flag_df,'obs':time_df}
+        
+        CP_df = pd.concat( [data_dict[f]['CP'] for f in data_dict] , axis=0)
+        
+        CPerr_df = pd.concat( [data_dict[f]['CPerr'] for f in data_dict] , axis=0)
+        
+        flag_df = pd.concat( [data_dict[f]['flags'] for f in data_dict] , axis=0)
+        
+        obs_df = pd.concat( [data_dict[f]['obs'] for f in data_dict] , axis=0)
+    
+    return( CP_df , CPerr_df , flag_df,  obs_df)
+
+
+
+#%% Fitting
+
+
+def CP_binary(x, params):
+    """
+    
+
+    Parameters
+    ----------
+    x: TYPE, list
+        DESCRIPTION. [Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R ]. Note x is North, y is East 
+        
+    params: TYPE, list 
+        DESCRIPTION. [dRA, dDEC, F, ud]
+        
+    see binary_bispectrum() for description of parameters 
+    
+    Returns
+    -------
+    CP
+    
+    """
+    
+    Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R = x
+    
+    dRA, dDEC, F, ud  = params 
+    
+    _, bispectrum  = binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F , ud, R )
+    
+    CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in wvls] ).T
+    
+    return( CP)
+  
+
+
+def V2_binary(x, params):
+    """
+    
+
+    Parameters
+    ----------
+    x: TYPE, list
+        DESCRIPTION. [Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R ]. Note x is North, y is East 
+        
+    params: TYPE, list 
+        DESCRIPTION. [dRA, dDEC, F, ud]
+        
+    see binary_bispectrum() for description of parameters 
+    
+    Returns
+    -------
+    CP
+    
+    """
+    
+    Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R = x
+    
+    dRA, dDEC, F, ud  = params 
+    
+    _, bispectrum  = binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F , ud, R )
+    
+    CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in wvls] ).T
+    
+    return( CP)
+
+
+def log_likelihood_CP(params, wvls, T, B, V2, V2err, CP, CPerr, R):
+    #u,v = x[:,0], x[:,1] #x is list with [u,v]
+    model_CP = CP_binary(T, params)
+    model_V2 = V2_binary(x_B, params)
+    sigma2_CP = CPerr**2  
+    sigma2_V2 = V2err**2  
+    return( -0.5 * (np.sum((V2 - model_V2) ** 2 / sigma2_V2 ) + np.sum((CP - model_CP) ** 2 / sigma2_CP )  )#+ np.log(sigma2)) )
+
+
+
+def log_prior(params):
+    dRA, dDEC, F, ud = params
+    #a, phi = params  
+    
+    if (-8888 <= dRA < np.pi) & (-8888 <= dDEC < np.pi) & (1e-4 <= F)  : #& (a>1): #  uniform prior on rotation of ellipse between 0-180 degrees
+
+        #gaussian prior on a
+        mu = mas2rad( ud_wvl ) #rad - note this is an external variable that should be defined 
+        sigma = mas2rad( 2 ) #* ud_wvl_err ) # 
+        return(np.log(1.0/(np.sqrt(2*np.pi)*sigma))-0.5*(theta-mu)**2/sigma**2)
+    
+    else:
+        return(-np.inf)
+
+def log_probability(params, wvls, T, B, V2, V2err, CP, CPerr, R):
+    lp = log_prior(params)
+    if not np.isfinite(lp):
+        return -np.inf
+    else:
+        return lp + log_likelihood(params, x, y, yerr)
+
+
+#%% PLOTTING GRAVITY COLORCODING SPECTRAL FEATURE 
+CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(gravity_files, EXTVER=11)
+#CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(pionier_files, EXTVER=None)
+
+B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
+B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
+B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+
+# I should also use flags! 
+wvl_grid = np.array(list(CP_df.columns))
+
+CO1_filter = ( (wvl_grid<2.298e-6) & (wvl_grid>2.2934e-6 ) ) 
+CO2_filter = ( (wvl_grid< 2.324e-6 ) & (wvl_grid>2.3226e-6) ) 
+CO3_filter = ( (wvl_grid< 2.3555e-6 ) & (wvl_grid>2.3525e-6 ) ) 
+bg_filter =  ( (wvl_grid< 2.167e-6 ) & (wvl_grid>2.165e-6 ) ) 
+# ( (wvl_grid<) & (wvl_grid<) ) or ( (wvl_grid<) & (wvl_grid<) )
+#H20_filter = 
+#brackagamma_filter = 
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[(~CO1_filter) & (~CO2_filter) & (~CO3_filter)] , CP_df.values[:,(~CO1_filter) & (~CO2_filter) & (~CO3_filter)],'.',color='k',alpha=0.1)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO1_filter] , CP_df.values[:,CO1_filter],'.',color='red',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO2_filter] , CP_df.values[:,CO2_filter],'.',color='orange',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO3_filter] , CP_df.values[:,CO3_filter],'.',color='yellow',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[bg_filter ] , CP_df.values[:,bg_filter ],'.',color='green',alpha=0.9)
+plt.plot( 0, 200,'.',color='red',alpha=0.9,label='CO bandhead (2-0)')
+plt.plot( 0, 200,'.',color='orange',alpha=0.9,label='CO bandhead (3-1)')
+plt.plot( 0, 200,'.',color='yellow',alpha=0.9,label='CO bandhead (4-2)')
+plt.plot( 0, 200,'.',color='green',alpha=0.9,label=r'$br\gamma$')
+plt.legend()
+plt.ylim(-40,40)
+
+plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+plt.ylabel('CP [deg]')
+
+
+#%%
 #---- Test 
 # set up observational  wavelengths and baselines 
 
-wvls = 1e-6 * np.linspace(1.4,2.6,10)
+wvls = 1e-6 * np.linspace(2,2.4,40)
 
 
-tel_x = 150 *(0.5-np.random.rand(4)) # North coordinate
-tel_y = 150 *(0.5-np.random.rand(4)) # East coorindate
+tel_x = 130 *(0.5-np.random.rand(10)) # North coordinate
+tel_y = 130 *(0.5-np.random.rand(10)) # East coorindate
 
 # the baselines vectors [(Bx,By)..(Bx,By)] formed by telescopes 
 Bx = np.diff( list(itertools.combinations(tel_x,2 ) ) ).reshape(-1) #north 
 By = np.diff( list(itertools.combinations(tel_y,2 )) ).reshape(-1) #east
-u = By[:,np.newaxis]/wvls #east
-v = Bx[:,np.newaxis]/wvls #north 
+u = By[:,np.newaxis]/wvls #east, columns correspond to wavelength
+v = Bx[:,np.newaxis]/wvls #north, columns correspond to wavelengt 
 baseline_coords = [(x,y) for x,y in zip( Bx, By) ]
 
 # x,y coorindates of baselines vector in each triangle !! 
@@ -570,10 +762,10 @@ B_tx , B_ty = get_trianlge_baselines_from_telescope_coordinates( tel_x, tel_y )
 # get_projected_baselines( B_x, B_y , 0, np.deg2rad(-100)) # need to deal with input format 
 
 # set-up binary parameters 
-F = 0.05
+F = 0.02
 ud = mas2rad(3)
-dRA = mas2rad(10)
-dDEC = mas2rad(1)
+dRA = mas2rad(3)
+dDEC = mas2rad(0)
 
 
 V_binary = binary_V(u, v, dRA, dDEC, F , ud, R=None)
@@ -612,6 +804,7 @@ ax[2].set_xlabel('max projected  in triangle (rad^-1)')
 ax[2].set_ylabel('CP [deg]')
 
 
+ax[2].set_ylim(-40,40)
 
 
 
@@ -621,9 +814,60 @@ ax[2].set_ylabel('CP [deg]')
 
 
 
+#%% [old to discard]
 
 
 
+def binary_bispectrum(u_mat, v_mat, wvls, dRA, dDEC, F , ud, R=None):
+    """
+    
+
+    Parameters
+    ----------
+    u_mat : TYPE, list of lists
+        DESCRIPTION. u coordinates = B_y/wvl, where B_y is projected baseline vector to the East, units = rad^-1, 
+        rows correspond to baselines, columns to wavelength
+    v_mat : TYPE, list of lists
+        DESCRIPTION. v coordinate = B_x/wvl, where B_x is projected baseline vector to the North, units = rad^-1
+        rows correspond to baselines, columns to wavelength
+    wvls : TYPE, array like
+        DESCRIPTION. wavelengths of observations 
+    dRA : TYPE. float 
+        DESCRIPTION. RA seperation between companion and primary, units = rad
+    dDEC : TYPE. float 
+        DESCRIPTION. DEC seperation between companion and primary, units = rad
+    F : TYPE. float 
+        DESCRIPTION. Flux ratio (companion/primary)
+    ud : TYPE. float 
+        DESCRIPTION. Uniform disk diameter of primary, units = rad
+    R : TYPE, optional
+        DESCRIPTION. spectral resolution of observation to calculate bandwidth smearing correction factor. The default is None.
+
+    Returns
+    -------
+    triangles, bispectrum.
+        triangles is a dictionary with wavelength key holding baseline coordinates (vertices) that form the triangle
+        bispectrum is a dictionary with wavelength key holding the bispectrum for each respective triangle (should be ordered the same between triangle and bispectrum dictionary)
+
+    """
+    
+    bispectrum={}  
+    triangles={}
+    for i,w in enumerate( wvls ): 
+        # fun fact: number of triangles from n points is n*(n-1)*(n-2)/6 ! 
+        
+        utmp = u_mat[:,i]
+        vtmp = v_mat[:,i]
+        Bcoord_at_wvl = list( w * np.array( [utmp, vtmp] ).T )
+        V_binary_at_wvl = binary_V(utmp, vtmp, dRA, dDEC, F , ud, R=R)
+        
+        B_triangles = itertools.combinations(Bcoord_at_wvl, 3) 
+        V_triangles = itertools.combinations(V_binary_at_wvl, 3) 
+        
+        bispectrum[w] = [v[0]*v[1]*np.conjugate(v[2]) for v in V_triangles]  
+        triangles[w] = list( B_triangles ) 
+        
+    return( triangles, bispectrum )
 
 
 
