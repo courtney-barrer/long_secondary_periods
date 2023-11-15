@@ -345,10 +345,11 @@ def log_prior(params):
     if not 1 <= a < 100: # uniform prior on a (major / minor axis ratio) between 1-100 (note we don't go below 1 to avoid degenerancy with rotation phi)
         return(-np.inf)
     
-    #gaussian prior on a
-    mu = mas2rad( ud_wvl ) #rad - note this is an external variable that should be defined 
-    sigma = mas2rad( 2 ) #* ud_wvl_err ) # 
-    return(np.log(1.0/(np.sqrt(2*np.pi)*sigma))-0.5*(theta-mu)**2/sigma**2)
+    else:
+        #gaussian prior on a
+        mu = mas2rad( ud_wvl ) #rad - note this is an external variable that should be defined 
+        sigma = mas2rad( 2 ) #* ud_wvl_err ) # 
+        return(np.log(1.0/(np.sqrt(2*np.pi)*sigma))-0.5*(theta-mu)**2/sigma**2)
 
     #if 0 < theta < mas2rad(200):# and -10.0 < log_f < 1.0:
     #    return 0.0
@@ -387,13 +388,21 @@ mat_M_wvl_filt = (mati_L_v2_df.columns > 4.5e-6) &  (mati_L_v2_df.columns <= 5e-
 mat_N_wvl_filt = (mati_N_v2_df.columns > 8e-6) & (mati_N_v2_df.columns <= 12.1e-6)#| (mati_L_v2_df.columns > 4.5e-6)
 
 # instrument vis tuples 
+# instrument vis tuples 
 pion_tup = (pion_v2_df , pion_v2err_df)
+grav_p1_tup = (grav_p1_v2_df[grav_p1_v2_df.columns[::50]][grav_B_filt] , grav_p1_v2err_df[grav_p1_v2err_df.columns[::50]][grav_B_filt] )
+grav_p2_tup = (grav_p2_v2_df[grav_p2_v2_df.columns[::50]][grav_B_filt] , grav_p2_v2err_df[grav_p2_v2err_df.columns[::50]][grav_B_filt] )
+mati_L_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2err_df.columns[mat_L_wvl_filt][::5]] )
+mati_M_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2err_df.columns[mat_M_wvl_filt][::5]] )
+mati_N_tup = (mati_N_v2_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] , mati_N_v2err_df[mati_N_v2err_df.columns[mat_N_wvl_filt][::5]] )
+
+"""pion_tup = (pion_v2_df , pion_v2err_df)
 grav_p1_tup = (grav_p1_v2_df[grav_p1_v2_df.columns[::50]][grav_B_filt] , grav_p1_v2err_df[grav_p1_v2_df.columns[::50]][grav_B_filt] )
 grav_p2_tup = (grav_p2_v2_df[grav_p2_v2_df.columns[::50]][grav_B_filt] , grav_p2_v2err_df[grav_p2_v2_df.columns[::50]][grav_B_filt] )
 mati_L_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] )
 mati_M_tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] )
 mati_N_tup = (mati_N_v2_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] , mati_N_v2err_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] )
-
+"""
 
 ins_vis_dict = {'Pionier (H)':pion_tup, 'Gravity P1 (K)' : grav_p1_tup, \
                 'Gravity P2 (K)' : grav_p2_tup, 'Matisse (L)':mati_L_tup,\
@@ -418,7 +427,7 @@ ellipse_fit_per_ins = {} # to hold fitting results per instrument photometric ba
 
 for ins in ins_vis_dict:
     
-    print(f'\n\n\n fitting {ins} visibility data to UD model\n\n\n')
+    print(f'\n\n\n fitting {ins} visibility data to Ellipse model\n\n\n')
     # get the current instrument visibilities
     v2_df, v2err_df = ins_vis_dict[ins]
     
@@ -495,7 +504,7 @@ for ins in ins_vis_dict:
         ndim = len(initial)
         
 
-        p0 = [initial + np.array([0.1, np.deg2rad(10), theta0/10 ]) * np.random.randn(3)  for i in range(nwalkers)]
+        p0 = [initial + np.array([0.1, np.deg2rad(10), theta0/10 ]) * np.random.rand(3)  for i in range(nwalkers)]
         #p0 = [initial + np.array([0.1, np.deg2rad(10)]) * np.random.rand(ndim)  for i in range(nwalkers)]
         
 
@@ -512,14 +521,19 @@ for ins in ins_vis_dict:
         
         
         # use sampler.get_autocorr_time()
-        flat_samples = sampler.get_chain(discard=200, thin=15, flat=True)
+        # The samples in an MCMC chain are not independent. consider every n samples to thin out to integrated autocorrelation time without loss of statistical power       
+        tau = sampler.get_autocorr_time() #                                                                                                                                 
+        thin = int(0.5 * np.min(tau))
+        print(f'based on sampler autocorrelation time we are considering every {thin} samples')
+        flat_samples = sampler.get_chain(discard=100, thin=thin, flat=True)
         
         
       
         if plot:
             flat_samples4plot = flat_samples.copy()
+            flat_samples4plot[:,1] = np.rad2deg(flat_samples4plot[:,1])
             flat_samples4plot[:,2] = rad2mas(flat_samples4plot[:,2])
-            flat_samples4plot[:,2] = np.rad2deg(flat_samples4plot[:,1])
+            
             plt.figure()
             #fig=corner.corner( flat_samples ,labels=['a',r'$\phi$',r'$\theta$'],quantiles=[0.16, 0.5, 0.84],\
             #           show_titles=True, title_kwargs={"fontsize": 12})

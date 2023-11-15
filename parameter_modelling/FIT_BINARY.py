@@ -57,9 +57,8 @@ V^2(f) = (v_1**2 + (R*v_2)**2 + (2*R*abs(v_1)*abs(v_2) * np.cos(2 * np.pi * f * 
 
 TO DO 
 ========
-Its clear I just need a function take takes the binary parameters , u1,u2,v2,v2 (same format as oi.fits data - note u3,v3 are implicitly implied u3=-u2-u1 to close the loop)
 
-I can include functions to calculate u1,u2,v1,v2 from telescope positions and then I can play with configurations etc myslef , just need to take into account uv plane rotation (do projected baselines)
+
 """
 
 
@@ -102,7 +101,7 @@ def binary_v2__m1(u, v, F, sep, theta): #https://hal.archives-ouvertes.fr/hal-01
 
 
 
-def chi2(y_model,y_true,yerr):
+def chi2(y_model, y_true, yerr):
     return(sum( (y_model-y_true)**2/yerr**2 ) )
 
     
@@ -414,7 +413,7 @@ def get_baseline_lengths_from_traingles(triangles):
 #h['OI_T3'].data['U1COORD '] , h['OI_T3'].data['U2COORD '] # but why is there only 2 for u and v?? 
 # u3 = -u1-u2 !! closing triangle!!
 
-def fit_prep(files, EXTVER=None):    
+def V2_prep(files, EXTVER=None):    
     # pionier data is [wvl, B], while gravity is [B,wvl ] (so gravity we want flip =Tue)              
     
     if EXTVER==None:
@@ -504,14 +503,6 @@ def fit_prep(files, EXTVER=None):
 
 
 
-pionier_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
-
-
-gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
-
-matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
-matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
-#[ h[i].header['EXTNAME'] for i in range(1,8)]
 
 
 
@@ -603,13 +594,12 @@ def CP_prep(files,EXTVER=None):
 
 
 
-#%% Fitting
 
-
-def CP_binary(x, params):
+def CP_binary(params, **x):
     """
     
-
+    assuming single wvl float input! so put wvls in list [wvls] - this is stupid - i should optimize it
+    
     Parameters
     ----------
     x: TYPE, list
@@ -626,19 +616,26 @@ def CP_binary(x, params):
     
     """
     
-    Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R = x
+    #wvls, V2, V2err, CP, CPerr, uv, Bx1, By1, Bx2, By2, R = x
     
     dRA, dDEC, F, ud  = params 
     
-    _, bispectrum  = binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F , ud, R )
+    # should include if statement about if wvls is float or array 
+    if not hasattr( x['wvls'], "__len__") : # if wvls are just a scalar then we reshape CP to have a single column 
+        _, bispectrum  = binary_bispectrum(x['Bx1'], x['Bx2'], x['By1'], x['By2'], [x['wvls']], dRA, dDEC, F , ud, x['R'] )
     
-    CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in wvls] ).T
+        CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in [x['wvls']] ] ).T
+        CP = CP.reshape(-1)
+    else: 
+        _, bispectrum  = binary_bispectrum(x['Bx1'], x['Bx2'], x['By1'], x['By2'], x['wvls'], dRA, dDEC, F , ud, x['R'] )
     
-    return( CP)
+        CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in x['wvls']] )
+        
+    return( CP )
   
 
-
-def V2_binary(x, params):
+        
+def V2_binary( params, **x):
     """
     
 
@@ -657,25 +654,31 @@ def V2_binary(x, params):
     CP
     
     """
+    #wvls, V2, V2err, CP, CPerr, uv, Bx1, By1, Bx2, By2, R = x['wvls'], x['V2'],x['V2err'], x['CP'], x['CPerr'], x['uv'], x['Bx1'] , x['By1'], x['Bx2'], x['By2'], x['R'] 
+    u,v = x['uv']
+    R= x['R']
     
-    Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, R = x
+    dRA, dDEC, F , ud = params 
     
-    dRA, dDEC, F, ud  = params 
+    V2 = abs( binary_V(u, v, dRA, dDEC, F , ud, R) )**2
     
-    _, bispectrum  = binary_bispectrum(Bx_proj1, Bx_proj2, By_proj1, By_proj2, wvls, dRA, dDEC, F , ud, R )
-    
-    CP = np.array( [np.rad2deg( np.angle( bispectrum[w] ) ) for w in wvls] ).T
-    
-    return( CP)
+    return( V2 )
+
+#def arg_dict2tuple( x ): # we put emcee arguments in dictionary for easy tracking , then pass them as a tuple (cqannot use dictionary in emcee)
+#    tup = ( x['wvls'], x['V2'],x['V2err'], x['CP'], x['CPerr'], x['uv'], x['Bx1'] , x['By1'], x['Bx2'], x['By2'], x['R'] )
+#    return(tup)
 
 
-def log_likelihood_CP(params, wvls, T, B, V2, V2err, CP, CPerr, R):
+def log_likelihood(params, **x):
     #u,v = x[:,0], x[:,1] #x is list with [u,v]
-    model_CP = CP_binary(T, params)
-    model_V2 = V2_binary(x_B, params)
-    sigma2_CP = CPerr**2  
-    sigma2_V2 = V2err**2  
-    return( -0.5 * (np.sum((V2 - model_V2) ** 2 / sigma2_V2 ) + np.sum((CP - model_CP) ** 2 / sigma2_CP )  )#+ np.log(sigma2)) )
+
+    sigma2_CP = x['CPerr']**2
+    sigma2_V2 = x['V2err']**2  
+    
+    model_CP = CP_binary( params, **x)
+    model_V2 = V2_binary( params, **x)
+
+    return( -0.5 * (np.sum((V2 - model_V2) ** 2 / sigma2_V2 ) + np.sum((CP - model_CP) ** 2 / sigma2_CP )  ) )#+ np.log(sigma2)) )
 
 
 
@@ -688,55 +691,84 @@ def log_prior(params):
         #gaussian prior on a
         mu = mas2rad( ud_wvl ) #rad - note this is an external variable that should be defined 
         sigma = mas2rad( 2 ) #* ud_wvl_err ) # 
-        return(np.log(1.0/(np.sqrt(2*np.pi)*sigma))-0.5*(theta-mu)**2/sigma**2)
+        return(np.log(1.0/(np.sqrt(2*np.pi)*sigma))-0.5*(ud-mu)**2/sigma**2)
     
     else:
         return(-np.inf)
 
-def log_probability(params, wvls, T, B, V2, V2err, CP, CPerr, R):
+def log_probability(params, **x):
     lp = log_prior(params)
     if not np.isfinite(lp):
         return -np.inf
     else:
-        return lp + log_likelihood(params, x, y, yerr)
+        return lp + log_likelihood(params, **x)
+    
+    
+#%% PREP
+
+pionier_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
 
 
-#%% PLOTTING GRAVITY COLORCODING SPECTRAL FEATURE 
-CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(gravity_files, EXTVER=11)
-#CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(pionier_files, EXTVER=None)
+gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
 
-B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
-B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
-B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#[ h[i].header['EXTNAME'] for i in range(1,8)]
 
-Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+#VIS
+pion_v2_df , pion_v2err_df  , pion_flag_df,  pion_obs_df = V2_prep(pionier_files)
 
-# I should also use flags! 
-wvl_grid = np.array(list(CP_df.columns))
+grav_p1_v2_df , grav_p1_v2err_df, grav_p1_flag_df , grav_p1_obs_df= V2_prep(gravity_files, EXTVER = 11 )
+grav_p2_v2_df , grav_p2_v2err_df , grav_p2_flag_df , grav_p2_obs_df = V2_prep(gravity_files, EXTVER = 12 )
 
-CO1_filter = ( (wvl_grid<2.298e-6) & (wvl_grid>2.2934e-6 ) ) 
-CO2_filter = ( (wvl_grid< 2.324e-6 ) & (wvl_grid>2.3226e-6) ) 
-CO3_filter = ( (wvl_grid< 2.3555e-6 ) & (wvl_grid>2.3525e-6 ) ) 
-bg_filter =  ( (wvl_grid< 2.167e-6 ) & (wvl_grid>2.165e-6 ) ) 
-# ( (wvl_grid<) & (wvl_grid<) ) or ( (wvl_grid<) & (wvl_grid<) )
-#H20_filter = 
-#brackagamma_filter = 
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[(~CO1_filter) & (~CO2_filter) & (~CO3_filter)] , CP_df.values[:,(~CO1_filter) & (~CO2_filter) & (~CO3_filter)],'.',color='k',alpha=0.1)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO1_filter] , CP_df.values[:,CO1_filter],'.',color='red',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO2_filter] , CP_df.values[:,CO2_filter],'.',color='orange',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO3_filter] , CP_df.values[:,CO3_filter],'.',color='yellow',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[bg_filter ] , CP_df.values[:,bg_filter ],'.',color='green',alpha=0.9)
-plt.plot( 0, 200,'.',color='red',alpha=0.9,label='CO bandhead (2-0)')
-plt.plot( 0, 200,'.',color='orange',alpha=0.9,label='CO bandhead (3-1)')
-plt.plot( 0, 200,'.',color='yellow',alpha=0.9,label='CO bandhead (4-2)')
-plt.plot( 0, 200,'.',color='green',alpha=0.9,label=r'$br\gamma$')
-plt.legend()
-plt.ylim(-40,40)
+mati_L_v2_df , mati_L_v2err_df , mati_L_flag_df, mati_L_obs_df = V2_prep(matisse_files_L )
+mati_N_v2_df , mati_N_v2err_df , mati_N_flag_df, mati_N_obs_df = V2_prep(matisse_files_N )
 
-plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
-plt.ylabel('CP [deg]')
+#CP
+pion_CP_df , pion_CPerr_df  , pion_flag_df,  pion_obs_df = CP_prep(pionier_files)
+
+grav_p1_CP_df , grav_p1_CPerr_df, grav_p1_flag_df , grav_p1_obs_df= CP_prep(gravity_files, EXTVER = 11 )
+grav_p2_CP_df , grav_p2_CPerr_df , grav_p2_flag_df , grav_p2_obs_df = CP_prep(gravity_files, EXTVER = 12 )
+
+mati_L_CP_df , mati_L_CPerr_df , mati_L_flag_df, mati_L_obs_df = CP_prep(matisse_files_L )
+mati_N_CP_df , mati_N_CPerr_df , mati_N_flag_df, mati_N_obs_df = CP_prep(matisse_files_N )
+
+# filters 
+grav_B_filt = grav_p1_v2_df.index.values !=0 
+grav_wvl_filt = (grav_p1_v2_df.columns > 1.9e-6) & (grav_p1_v2_df.columns < 2.4e-6)
+
+# matisse wvl limits from https://www.eso.org/sci/facilities/paranal/instruments/matisse.html
+mat_L_wvl_filt = (mati_L_v2_df.columns > 3.2e-6) & (mati_L_v2_df.columns < 3.9e-6) #| (mati_L_v2_df.columns > 4.5e-6) 
+mat_M_wvl_filt = (mati_L_v2_df.columns > 4.5e-6) &  (mati_L_v2_df.columns <= 5e-6)
+mat_N_wvl_filt = (mati_N_v2_df.columns > 8e-6) & (mati_N_v2_df.columns <= 12.1e-6)#| (mati_L_v2_df.columns > 4.5e-6)
 
 
+# instrument vis tuples 
+pion_V2tup = (pion_v2_df , pion_v2err_df)
+grav_p1_V2tup = (grav_p1_v2_df[grav_p1_v2_df.columns[::50]][grav_B_filt] , grav_p1_v2err_df[grav_p1_v2err_df.columns[::50]][grav_B_filt] )
+grav_p2_V2tup = (grav_p2_v2_df[grav_p2_v2_df.columns[::50]][grav_B_filt] , grav_p2_v2err_df[grav_p2_v2err_df.columns[::50]][grav_B_filt] )
+mati_L_V2tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_L_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2err_df.columns[mat_L_wvl_filt][::5]] )
+mati_M_V2tup = (mati_L_v2_df[mati_L_v2_df.columns[mat_M_wvl_filt][::5]] , mati_L_v2err_df[mati_L_v2err_df.columns[mat_M_wvl_filt][::5]] )
+mati_N_V2tup = (mati_N_v2_df[mati_N_v2_df.columns[mat_N_wvl_filt][::5]] , mati_N_v2err_df[mati_N_v2err_df.columns[mat_N_wvl_filt][::5]] )
+
+
+# instrument vis tuples 
+pion_CPtup = (pion_CP_df , pion_CPerr_df)
+grav_p1_CPtup = (grav_p1_CP_df[grav_p1_CP_df.columns[::50]] , grav_p1_CPerr_df[grav_p1_CPerr_df.columns[::50]] )
+grav_p2_CPtup = (grav_p2_CP_df[grav_p2_CP_df.columns[::50]] , grav_p2_CPerr_df[grav_p2_CPerr_df.columns[::50]] )
+mati_L_CPtup = (mati_L_CP_df[mati_L_CP_df.columns[mat_L_wvl_filt][::5]] , mati_L_CPerr_df[mati_L_CPerr_df.columns[mat_L_wvl_filt][::5]] )
+mati_M_CPtup = (mati_L_CP_df[mati_L_CP_df.columns[mat_M_wvl_filt][::5]] , mati_L_CPerr_df[mati_L_CPerr_df.columns[mat_M_wvl_filt][::5]] )
+mati_N_CPtup = (mati_N_CP_df[mati_N_CP_df.columns[mat_N_wvl_filt][::5]] , mati_N_CPerr_df[mati_N_CPerr_df.columns[mat_N_wvl_filt][::5]] )
+
+ins_V2_dict = {'Pionier (H)':pion_V2tup, 'Gravity P1 (K)' : grav_p1_V2tup, \
+                'Gravity P2 (K)' : grav_p2_V2tup, 'Matisse (L)':mati_L_V2tup,\
+                    'Matisse (M)':mati_M_V2tup, 'Matisse (N)':mati_N_V2tup }
+    
+ins_CP_dict = {'Pionier (H)':pion_CPtup, 'Gravity P1 (K)' : grav_p1_CPtup, \
+                'Gravity P2 (K)' : grav_p2_CPtup, 'Matisse (L)':mati_L_CPtup,\
+                    'Matisse (M)':mati_M_CPtup, 'Matisse (N)':mati_N_CPtup }
+
+    
 #%%
 #---- Test 
 # set up observational  wavelengths and baselines 
@@ -805,6 +837,421 @@ ax[2].set_ylabel('CP [deg]')
 
 
 ax[2].set_ylim(-40,40)
+
+
+#%% Try brute force optimization 
+
+fig_path = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/binary_fit/'
+ud_fits = pd.read_csv('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/UD_fit.csv',index_col=0)
+param_labels=['dRA', 'dDEC', 'F', 'ud'] #['a','phi'] #param_labels=['a','phi','theta'] #a, phi,theta = params
+
+bestParams = []
+redchi2 = []
+wvls = []
+ndim = len(param_labels)
+for ins in ins_V2_dict:
+    
+    print(f'\n\n\n fitting {ins} visibility data to UD model\n\n\n')
+    # get the current instrument visibilities
+    v2_df, v2err_df = ins_V2_dict[ins]
+    CP_df, CPerr_df = ins_CP_dict[ins]
+    
+    binary_fit_results = {}
+    
+
+    #params = [] #best fit
+    binary_result_per_wvl_dict = {xxx:{ 'mean' :[], 'median' : [], 'err' : [] } for xxx in param_labels}
+    
+    intermediate_results_dict = {}
+    x = {}
+    
+    for wvl_indx, wvl in enumerate( v2_df.columns ):
+        
+        ud_wvl = ud_fits['ud_mean'].iloc[ np.argmin(abs(ud_fits.index - wvl)) ] #best ud fit at wavelength (mas)
+        #ud_wvl_err = ud_fits['ud_err'].iloc[ np.argmin(abs(ud_fits.index - wvl)) ] #best ud fit at wavelength (mas)
+        
+        intermediate_results_dict[wvl] = { } #{'rho':[], 'v2_obs':[], 'v2_obs_err':[],\'v2_model':[],'samplers':[] }
+
+        # u,v coorindates ### #
+        uv_unfilt = 1/wvl  *  np.array([[aa[0] for aa in v2_df.index.values],[aa[1] for aa in v2_df.index.values]]).T # np.array([[aa[0] for aa in v2_df.index.values],[aa[1] for aa in v2_df.index.values]]).reshape(len(v2_df.index.values),2)
+        
+        # baselines in  tiagnle 
+        Bx1 = CP_df.index.get_level_values('u1')
+        By1 = CP_df.index.get_level_values('v1')
+        Bx2 = CP_df.index.get_level_values('u2')
+        By2 = CP_df.index.get_level_values('v2')
+        #B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+
+        # Check rho matches v2_df.index.values tuples
+        v2 = v2_df[wvl].values  # |V|^2
+        v2_err = v2err_df[wvl].values # uncertainty 
+        
+        CP = CP_df[wvl].values
+        CP_err = CPerr_df[wvl].values
+        # filter out unphysical V2 values 
+        v2_filt = (v2>0) & (v2<1.1)
+        CP_filt = np.isfinite( CP )
+        
+        # short hand model notation 
+        uv, V2, V2err = uv_unfilt[v2_filt].T , v2[v2_filt], v2_err[v2_filt]
+        
+        CP, CPerr = CP[CP_filt], CP_err[CP_filt]
+        
+        
+        x['wvls'] = wvl
+        x['V2'] = V2
+        x['V2err'] = V2err
+        x['CP'] = CP
+        x['CPerr'] = CPerr
+        x['R'] = None
+        x['uv'] = uv
+        
+        x['uv'] = uv
+        x['Bx1'] = np.array(Bx1)
+        x['By1'] = np.array(By1)
+        x['Bx2'] = np.array(Bx2)
+        x['By2'] = np.array(By2)
+        
+        #arg_tup = arg_dict2tuple( x )
+        print(' begin fit' )
+        # TO CHECK WE CAN PLOT (SQRT(X[0]**2+X[1]**2), Y) SHOULD SEE NICE V2 CURVE FROM DATA! 
+    
+        """
+        plt.figure()
+        plt.semilogy( [ -log_likelihood(mas2rad(i), x, y, yerr) for i in range(10) ] )
+        
+        np.random.seed(42)
+        nll = lambda *args: -log_likelihood(*args)
+        initial = np.array([ mas2rad(5) ]) #, np.log(0.1)]) #+ 0.1 * np.random.randn(2)
+        soln = minimize(nll, initial, args=(x, y, yerr),tol=mas2rad(0.1))
+        """
+        
+        
+        
+        #pos = soln.x + 1e-4 * np.random.randn(32, 3)
+        #pos = [mas2rad(5)]
+        #nwalkers, ndim = 32,1
+        
+        nwalkers = 150 #32
+        
+        # initialize at UD fit (save a table)quick grid search 
+        theta0 = mas2rad( ud_wvl ) #rad
+        
+        #do rough grid search 
+        best_chi2 = np.inf # initialize at infinity 
+        for dRA in np.linspace( -10, 10, 10):
+            for dDEC in np.linspace( -10,10,10):
+                for F in np.logspace( -4, -2, 10):
+
+                    params_tmp=[mas2rad(dRA), mas2rad(dDEC), F, theta0]
+                    #params_tmp=[a_tmp, phi_tmp]
+                    V2_model_cand =  V2_binary( params_tmp, **x) 
+                    CP_model_cand =  CP_binary( params_tmp, **x) # should fix things to get rid of reshape necisity  
+                    chi2_tmp = chi2(V2_model_cand  , x['V2'], x['V2err']) + chi2(CP_model_cand, x['CP'], x['CPerr'])
+                    if chi2_tmp < best_chi2:
+                        best_chi2 = chi2_tmp 
+                        initial = params_tmp
+                    
+
+        #
+        V2_model = V2_binary( initial,  **x) #disk_v2( x, mas2rad(diam_median[-1] ) ) 
+        
+        CP_model = CP_binary( initial, **x ) 
+        
+        wvls.append( wvl )
+        bestParams.append( initial )
+        redchi2.append( ( chi2(V2_model , x['V2'], x['V2err']) + chi2(CP_model , x['CP'], x['CPerr']) ) / (len(x['V2']) + len(x['CP']) - ndim  ))
+        
+bestParams = np.array(bestParams)        
+
+plt.figure()
+plt.scatter( rad2mas(bestParams[:,0]), rad2mas(bestParams[:,1]) ,alpha=0.1)
+
+
+plt.plot( np.array( [a**2 + b**2 for a,b in x['uv'].T] )**0.5 , x['V2'] ,'.',color='r'); plt.plot( np.array( [a**2 + b**2 for a,b in x['uv'].T] )**0.5 , V2_model ,'.',color='g')
+#%%
+plot=True
+fig_path = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/binary_fit/'
+ud_fits = pd.read_csv('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/UD_fit.csv',index_col=0)
+param_labels=['dRA', 'dDEC', 'F', 'ud'] #['a','phi'] #param_labels=['a','phi','theta'] #a, phi,theta = params
+
+binary_fit_per_ins = {} # to hold fitting results per instrument photometric band
+
+for ins in ins_V2_dict:
+    
+    print(f'\n\n\n fitting {ins} visibility data to UD model\n\n\n')
+    # get the current instrument visibilities
+    v2_df, v2err_df = ins_V2_dict[ins]
+    CP_df, CPerr_df = ins_CP_dict[ins]
+    
+    binary_fit_results = {}
+    
+    redchi2 = []
+    
+    #params = [] #best fit
+    binary_result_per_wvl_dict = {xxx:{ 'mean' :[], 'median' : [], 'err' : [] } for xxx in param_labels}
+    
+    intermediate_results_dict = {}
+    x = {}
+    for wvl_indx, wvl in enumerate(v2_df.columns ):
+        
+        ud_wvl = ud_fits['ud_mean'].iloc[ np.argmin(abs(ud_fits.index - wvl)) ] #best ud fit at wavelength (mas)
+        #ud_wvl_err = ud_fits['ud_err'].iloc[ np.argmin(abs(ud_fits.index - wvl)) ] #best ud fit at wavelength (mas)
+        
+        intermediate_results_dict[wvl] = { } #{'rho':[], 'v2_obs':[], 'v2_obs_err':[],\'v2_model':[],'samplers':[] }
+
+        # u,v coorindates ### #
+        uv_unfilt = 1/wvl  *  np.array([[aa[0] for aa in v2_df.index.values],[aa[1] for aa in v2_df.index.values]]).T # np.array([[aa[0] for aa in v2_df.index.values],[aa[1] for aa in v2_df.index.values]]).reshape(len(v2_df.index.values),2)
+        
+        # baselines in  tiagnle 
+        Bx1 = CP_df.index.get_level_values('u1')
+        By1 = CP_df.index.get_level_values('v1')
+        Bx2 = CP_df.index.get_level_values('u2')
+        By2 = CP_df.index.get_level_values('v2')
+        #B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+
+        # Check rho matches v2_df.index.values tuples
+        v2 = v2_df[wvl].values  # |V|^2
+        v2_err = v2err_df[wvl].values # uncertainty 
+        
+        CP = CP_df[wvl].values
+        CP_err = CPerr_df[wvl].values
+        # filter out unphysical V2 values 
+        v2_filt = (v2>0) & (v2<1.1)
+        CP_filt = np.isfinite( CP )
+        
+        # short hand model notation 
+        uv, V2, V2err = uv_unfilt[v2_filt].T , v2[v2_filt], v2_err[v2_filt]
+        
+        CP, CPerr = CP[CP_filt], CP_err[CP_filt]
+        
+        
+        x['wvls'] = wvl
+        x['V2'] = V2
+        x['V2err'] = V2err
+        x['CP'] = CP
+        x['CPerr'] = CPerr
+        x['R'] = None
+        x['uv'] = uv
+        
+        x['uv'] = uv
+        x['Bx1'] = np.array(Bx1)
+        x['By1'] = np.array(By1)
+        x['Bx2'] = np.array(Bx2)
+        x['By2'] = np.array(By2)
+        
+        #arg_tup = arg_dict2tuple( x )
+        print(' begin fit' )
+        # TO CHECK WE CAN PLOT (SQRT(X[0]**2+X[1]**2), Y) SHOULD SEE NICE V2 CURVE FROM DATA! 
+    
+        """
+        plt.figure()
+        plt.semilogy( [ -log_likelihood(mas2rad(i), x, y, yerr) for i in range(10) ] )
+        
+        np.random.seed(42)
+        nll = lambda *args: -log_likelihood(*args)
+        initial = np.array([ mas2rad(5) ]) #, np.log(0.1)]) #+ 0.1 * np.random.randn(2)
+        soln = minimize(nll, initial, args=(x, y, yerr),tol=mas2rad(0.1))
+        """
+        
+        
+        
+        #pos = soln.x + 1e-4 * np.random.randn(32, 3)
+        #pos = [mas2rad(5)]
+        #nwalkers, ndim = 32,1
+        
+        nwalkers = 150 #32
+        
+        # initialize at UD fit (save a table)quick grid search 
+        theta0 = mas2rad( ud_wvl ) #rad
+        
+        #do rough grid search 
+        best_chi2 = np.inf # initialize at infinity 
+        for dRA in np.linspace( 0, 20, 20):
+            for dDEC in np.linspace( 0,20,20):
+                for F in np.logspace( -4, -2, 15):
+
+                    params_tmp=[mas2rad(dRA), mas2rad(dDEC), F, theta0]
+                    #params_tmp=[a_tmp, phi_tmp]
+                    V2_model_cand =  V2_binary( params_tmp, **x) 
+                    CP_model_cand =  CP_binary( params_tmp, **x) # should fix things to get rid of reshape necisity  
+                    chi2_tmp = chi2(V2_model_cand  , x['V2'], x['V2err']) + chi2(CP_model_cand, x['CP'], x['CPerr'])
+                    if chi2_tmp < best_chi2:
+                        best_chi2 = chi2_tmp 
+                        initial = params_tmp
+                    
+        print(f'best initial parameters = {initial} with chi2={best_chi2}')
+        #a0 = 1 #squeeze/stretching (1=circle) - no units
+        #phi0 = 0 #rotation (rad)
+
+        #initial = np.array([ a0, phi0, theta0 ])
+        ndim = len(initial)
+        
+        p0 = [initial + np.array([mas2rad(2), mas2rad(2), 1e-2 , theta0/10 ]) * np.random.randn(4)  for i in range(nwalkers)]
+        #p0 = [initial + np.array([0.1, np.deg2rad(10)]) * np.random.rand(ndim)  for i in range(nwalkers)]
+        
+        sampler = emcee.EnsembleSampler(
+            nwalkers, ndim, log_probability, kwargs = x
+        )
+        sampler.run_mcmc(p0, 1000, progress=True);
+        
+        #samples = sampler.get_chain(flat=True)
+        
+        #plt.hist(np.log10(samples) ) , bins = np.logspace(-9,-7,100)) #[-1,:,0])
+        
+        #plt.hist( np.log10( samples ) , bins=np.linspace(-9,-5,100 ))
+        
+        
+        # use sampler.get_autocorr_time()
+        flat_samples = sampler.get_chain(discard=200, thin=15, flat=True)
+        
+        
+      
+        if plot:
+            flat_samples4plot = flat_samples.copy()
+            flat_samples4plot[:,2] = rad2mas(flat_samples4plot[:,2])
+            flat_samples4plot[:,2] = np.rad2deg(flat_samples4plot[:,1])
+            plt.figure()
+            #fig=corner.corner( flat_samples ,labels=['a',r'$\phi$',r'$\theta$'],quantiles=[0.16, 0.5, 0.84],\
+            #           show_titles=True, title_kwargs={"fontsize": 12})
+            fig=corner.corner( flat_samples4plot ,labels=['dRA', 'dDEC', 'F', 'ud'],quantiles=[0.16, 0.5, 0.84],\
+                       show_titles=True, title_kwargs={"fontsize": 12})
+
+            fig.gca().annotate(f'{ins} - {round(1e6*wvl,2)}um',xy=(1.0, 1.0),xycoords="figure fraction", xytext=(-20, -10), textcoords="offset points", ha="right", va="top")
+            
+            if not os.path.exists(fig_path):
+                os.mkdir(fig_path)
+            plt.savefig(os.path.join(fig_path,f'binary_mcmc_corner_{ins.split()[0]}_{round(1e6*wvl,2)}um.jpeg'))
+            
+        """plt.figure() 
+        plt.errorbar(v2_df.columns, v2_df.iloc[wvl_indx], yerr= v2err_df.iloc[wvl_indx], linestyle=' ')
+        plt.xlabel('Baseline (m)')
+        plt.ylabel(r'$V^2$')
+        plt.plot(v2_df.columns,  disk_v2( rho, np.mean( rad2mas( flat_samples[:, :] ) ) *1e-3 * np.pi/180 / 3600  ) ,'.')
+        """
+        
+        #y_model = np.median( rad2mas( flat_samples[:, :] ) ) * 1e-3 * np.pi/180 / 3600
+        
+        #for i,k in enumerate(binary_result_per_wvl_dict):
+        #    mcmc = np.percentile(flat_samples[:, i], [16, 50, 84],axis=0)
+        #    q = np.diff(mcmc)
+        
+        
+        #    binary_result_per_wvl_dict[k]['mean'].append( np.mean(  flat_samples[:, i] ) )
+        #    binary_result_per_wvl_dict[k]['median'].append( mcmc[1] )
+        #    binary_result_per_wvl_dict[k]['err'].append( q )
+        
+        """
+        fig1 = plt.figure(1)
+        #Plot Data-model
+        frame1=fig1.add_axes((.1,.3,.8,.6))
+        fig1.set_tight_layout(True)
+        plt.errorbar(v2_df.columns, v2_df.iloc[wvl_indx], yerr= v2err_df.iloc[wvl_indx], linestyle=' ',color='darkred',alpha=0.6,label='measured')
+        plt.plot(v2_df.columns,  disk_v2( rho, mas2rad(diam_median[-1])  ) ,'.',color='darkblue',alpha=0.6, label='model')
+        plt.ylabel(r'$V^2$', fontsize=15)
+        plt.gca().tick_params(labelsize=13)
+        plt.legend(fontsize=15)
+        frame2=fig1.add_axes((.1,.1,.8,.2))    
+          
+        plt.plot(v2_df.columns, ((y-y_model.values)/yerr),'o',color='k')
+        plt.axhline(0,color='g',linestyle='--')
+        plt.ylabel(r'$\chi_i$',fontsize=15 ) #r'$\Delta V^2 /\sigma_{V2}$',fontsize=15)
+        plt.gca().tick_params(labelsize=13)
+        plt.xlabel('Baseline (m)',fontsize=15)"""
+        
+        
+
+        for i,k in enumerate(param_labels):
+            
+            intermediate_results_dict[wvl][k]={}
+            mcmc = np.percentile(flat_samples[:, i], [16, 50, 84],axis=0)
+            q = np.diff(mcmc)
+            
+            intermediate_results_dict[wvl][k]['mean'] = np.mean(  flat_samples[:, i] ) 
+            intermediate_results_dict[wvl][k]['median'] = mcmc[1] 
+            intermediate_results_dict[wvl][k]['err'] = q 
+            
+            #binary_result_per_wvl_dict
+            
+        #best fit
+        best_params_wvl = [intermediate_results_dict[wvl][k]['median'] for k in param_labels] 
+        
+        #
+        V2_model = V2_binary( best_params_wvl,  **x) #disk_v2( x, mas2rad(diam_median[-1] ) ) 
+        
+        CP_model = CP_binary(best_params_wvl, **x) 
+        
+        redchi2.append( ( chi2(V2_model , x['V2'], ['V2err']) + chi2(CP_model , x['CP'], x['CPerr']) ) / (len(v2_df[wvl])-ndim  ))
+        
+              
+        intermediate_results_dict[wvl]['uv'] = x['uv']
+        intermediate_results_dict[wvl]['Bx1'] = x['Bx1'] #x is north 
+        intermediate_results_dict[wvl]['By1'] = x['By1'] # y is East
+        intermediate_results_dict[wvl]['Bx2'] = x['Bx2']
+        intermediate_results_dict[wvl]['By2'] = x['By2']
+        intermediate_results_dict[wvl]['v2_obs'] = x['V2']
+        intermediate_results_dict[wvl]['v2_obs_err'] = x['V2err']
+        intermediate_results_dict[wvl]['v2_model'] = V2_model
+        intermediate_results_dict[wvl]['CP_obs'] = x['CP']
+        intermediate_results_dict[wvl]['CP_obs_err'] = x['CPerr']
+        intermediate_results_dict[wvl]['CP_model'] = CP_model
+        intermediate_results_dict[wvl]['samplers'] = flat_samples
+        
+        #reduced chi2 
+        #redchi2.append(chi2(y_model  , y, yerr) / (len(v2_df.iloc[wvl_indx])-1))
+        
+        print('reduced chi2 = {}'.format( redchi2[-1]) )
+    
+    #for i,k in enumerate(binary_result_per_wvl_dict):
+    #    binary_fit_results[k]={}
+    #    binary_fit_results[k]['mean'] = diam_mean
+    #    binary_fit_results[k]['median'] = diam_median
+    #    binary_fit_results[k]['err'] = diam_err
+        
+    binary_fit_results['redchi2'] = redchi2
+    
+    binary_fit_results['intermediate_results'] = intermediate_results_dict
+    
+    binary_fit_per_ins[ins] = binary_fit_results
+
+
+
+#%% PLOTTING GRAVITY COLORCODING SPECTRAL FEATURE 
+CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(gravity_files, EXTVER=11)
+#CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(pionier_files, EXTVER=None)
+
+B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
+B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
+B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+
+# I should also use flags! 
+wvl_grid = np.array(list(CP_df.columns))
+
+CO1_filter = ( (wvl_grid<2.298e-6) & (wvl_grid>2.2934e-6 ) ) 
+CO2_filter = ( (wvl_grid< 2.324e-6 ) & (wvl_grid>2.3226e-6) ) 
+CO3_filter = ( (wvl_grid< 2.3555e-6 ) & (wvl_grid>2.3525e-6 ) ) 
+bg_filter =  ( (wvl_grid< 2.167e-6 ) & (wvl_grid>2.165e-6 ) ) 
+# ( (wvl_grid<) & (wvl_grid<) ) or ( (wvl_grid<) & (wvl_grid<) )
+#H20_filter = 
+#brackagamma_filter = 
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[(~CO1_filter) & (~CO2_filter) & (~CO3_filter)] , CP_df.values[:,(~CO1_filter) & (~CO2_filter) & (~CO3_filter)],'.',color='k',alpha=0.1)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO1_filter] , CP_df.values[:,CO1_filter],'.',color='red',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO2_filter] , CP_df.values[:,CO2_filter],'.',color='orange',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO3_filter] , CP_df.values[:,CO3_filter],'.',color='yellow',alpha=0.9)
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[bg_filter ] , CP_df.values[:,bg_filter ],'.',color='green',alpha=0.9)
+plt.plot( 0, 200,'.',color='red',alpha=0.9,label='CO bandhead (2-0)')
+plt.plot( 0, 200,'.',color='orange',alpha=0.9,label='CO bandhead (3-1)')
+plt.plot( 0, 200,'.',color='yellow',alpha=0.9,label='CO bandhead (4-2)')
+plt.plot( 0, 200,'.',color='green',alpha=0.9,label=r'$br\gamma$')
+plt.legend()
+plt.ylim(-40,40)
+
+plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+plt.ylabel('CP [deg]')
 
 
 
