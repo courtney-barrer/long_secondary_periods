@@ -515,15 +515,18 @@ def prepare_CP(files, EXTVAR=None):
     cp_sigma = {} #all cp sigmas away from zero 
     cp_values = {} # all cp
     cp_mask = {} #bad data flag 
-    AT_config = []
+    atconfig = {} 
+    #
     for f in files :    
         h = oifits.open(f)
                 
-        AT_config.append( h['OI_ARRAY'].data['STA_NAME'] )
+        #AT_config.append( h['OI_ARRAY'].data['STA_NAME'] )
         
         indx2station = {h['OI_ARRAY'].data['STA_INDEX'][i]:h['OI_ARRAY'].data['STA_NAME'][i] for i in range(len(h['OI_ARRAY'].data['STA_NAME']))}
         
         current_config = ''.join(list(np.sort(h['OI_ARRAY'].data['STA_NAME'])))
+        
+        #B = np.sqrt(h['OI_VIS'].data['UCOORD']**2 + h['OI_VIS'].data['VCOORD']**2)
         
         #effective wavelength
         wvl = h['OI_WAVELENGTH',EXTVAR].data['EFF_WAVE']
@@ -539,16 +542,18 @@ def prepare_CP(files, EXTVAR=None):
         filt = ~cp_flag
         for i,w in enumerate(wvl):
             if w not in cp_values:
+                atconfig[w] = [current_config] #[set( h['OI_ARRAY'].data['STA_NAME'] )]
                 cp_values[w] = [list( cp[:,i] ) ]
                 cp_sigma[w] = [list( cp[:,i] / cp_err[:,i] ) ]
                 cp_mask[w] = [list( filt[:,i] ) ]
             else:
+                atconfig[w].append( current_config ) #set( h['OI_ARRAY'].data['STA_NAME'] ) )
                 cp_values[w].append( list( cp[:,i] ) )
                 cp_sigma[w].append( list( cp[:,i] / cp_err[:,i] ) )
                 cp_mask[w].append( list( filt[:,i] ) )
 
 
-    return( cp_values, cp_sigma , cp_mask, AT_config)
+    return( cp_values, cp_sigma , cp_mask, atconfig)
 
 
 
@@ -839,15 +844,15 @@ axx.set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
 fig,ax = plt.subplots(3, 2, figsize=(15,10),sharex=True,sharey=True) 
 for row, conf in zip(range(len(ax)),configurations): 
     for coord in mast_dict_dipole[conf]:
-        ax[row,0].plot( 1e6*wvls, mast_dict_dipole[conf][coord]['CP'] ,'.',color='k',alpha=0.5)
+        ax[row,0].plot( 1e6*wvls, mast_dict_dipole[conf][coord]['CP'] ,'.',alpha=0.2) #
     ax[row,0].set_ylabel(r'CP [deg]',**fig_kwargs )
     ax[row,0].text( 8, 150,f'{conf} configuration' ,**fig_kwargs)
 ax[row,0].set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
-ax[0,0].set_title('oscilatory mode hypothesis')
+ax[0,0].set_title('oscillatory mode hypothesis')
 
 for row, conf in zip(range(len(ax)),configurations): 
     for coord in mast_dict_binary[conf]:
-        ax[row,1].plot( 1e6*wvls, mast_dict_binary[conf][coord]['CP'] ,'.',color='k',alpha=0.5)
+        ax[row,1].plot( 1e6*wvls, mast_dict_binary[conf][coord]['CP'] ,'.',alpha=0.2) #,color='k'
     ax[row,1].text( 8, 150,f'{conf} configuration' , **fig_kwargs)
 ax[row,1].set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
 ax[0,1].set_title('binary hypothesis')
@@ -870,6 +875,11 @@ gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_
 
 matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
 matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+
+bas_files = [   ]
+
+#filter out bad files (like bad N band calibrator )
+
 #[ h[i].header['EXTNAME'] for i in range(1,8)]
 
 file_set_labels = ['H','K','LM','N']
@@ -887,7 +897,7 @@ for lab , files in zip(file_set_labels, [pionier_files, gravity_files, matisse_f
     cp_flat =np.array([])
     cpZ_flat =np.array([])
     wvl_flat =np.array([])
-    configs.append(  at_config  )
+    configs_flat =np.array([])
     for w in cp_values:
         
         mask_tmp = np.array( cp_mask[w] )
@@ -895,28 +905,56 @@ for lab , files in zip(file_set_labels, [pionier_files, gravity_files, matisse_f
         v_tmp = np.array( cp_values[w] )
         s_tmp = np.array( cp_sigma[w] )
         wvl_tmp = w * np.ones(np.array(cp_values[w]).shape)
-    
+        config_tmp = np.repeat( np.array(at_config[w]).reshape(-1,1), 4, axis=1)
+        
         v_filt = v_tmp[mask_tmp]
         s_filt = s_tmp[mask_tmp]
         wvl_filt = wvl_tmp[mask_tmp]
+        c_filt = config_tmp[mask_tmp]
         
         wvl_flat=np.concatenate([wvl_flat,wvl_filt])
         cp_flat=np.concatenate([cp_flat,v_filt])
         cpZ_flat=np.concatenate([cpZ_flat,s_filt])
+        configs_flat=np.concatenate([configs_flat,c_filt])
+        
+    obs_CP_dict[lab] = {'wvl_flat':wvl_flat,'cp_flat':cp_flat,'cpZ_flat':cpZ_flat,'config':configs_flat}
 
-    obs_CP_dict[lab] = {'wvl_flat':wvl_flat,'cp_flat':cp_flat,'cpZ_flat':cpZ_flat}
-
-all_wvls = flatten_comprehension( [obs_CP_dict[lab]['wvl_flat'] for lab in obs_CP_dict] )
+all_wvls = np.array( flatten_comprehension( [obs_CP_dict[lab]['wvl_flat'] for lab in obs_CP_dict] ) )
 all_cp = flatten_comprehension( [obs_CP_dict[lab]['cp_flat'] for lab in obs_CP_dict] )
-np.array( [set(x) for x in at_config] ) == set(['A0', 'J2', 'G1', 'K0'])
+all_confi = np.array( flatten_comprehension( [obs_CP_dict[lab]['config'] for lab in obs_CP_dict] ) )
 
 
 
-fig,ax = plt.subplots(1,1,figsize=(8,5))
+def confList2str(conf_list):
+    return( ''.join(np.sort( list(conf_list) ) ) )
+
+large_filt = all_confi  == confList2str( ['A0', 'G2', 'J2', 'J3'] )
+medium_filt =  all_confi == confList2str( ['K0', 'G2', 'D0', 'J3'])
+small_filt =  all_confi  == confList2str( ['A0', 'B2', 'D0', 'C1'] )
+
+# sum(large_filt | medium_filt | small_filt)  = 32255
+# sum(~(large_filt | medium_filt | small_filt) ) = 39892
+
+interm_filt_1 =   all_confi == confList2str( ['A0','G1','J2','J3'] ) #large
+interm_filt_2 =   all_confi  == confList2str( ['K0', 'G1', 'J2', 'A0'] )  #medium
+interm_filt_3 =  all_confi  == confList2str( ['D0', 'G2', 'J3', 'K0'] )  # astrometric
+interm_filt_4 =  all_confi  == confList2str( ['A0','B2','D0','J3'] )  # small with 1 large baseline
+
+
+np.array( all_confi  )[~(large_filt | medium_filt | small_filt | interm_filt_1 | interm_filt_2 | interm_filt_3 | interm_filt_4  )]
+
+
+# ok combine them like this 
+
+grande_conf = large_filt | interm_filt_1  | interm_filt_3 | interm_filt_4  #41935
+mediano_conf = medium_filt  | interm_filt_2 #28936
+pequeno_conf = small_filt  #16670
+
+"""fig,ax = plt.subplots(1,1,figsize=(8,5))
 ax.plot( 1e6* np.array(all_wvls), np.array(all_cp),'.')
 ax.set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
 ax.set_ylabel(r'CP [deg]',**fig_kwargs )
-
+"""
 
 
 spectral_feature_dictionary_k = {'HeI':[2.038, 2.078], 'MgII':[2.130, 2.150],'Brg':[2.136, 2.196],\
@@ -930,18 +968,45 @@ spectral_feature_dictionary_LM = {'Pfe':[3.010, 3.070], 'Pfd':[3.270, 3.330],'Pf
 spectral_feature_dictionary_N = {'OI':[8.416, 8.476], 'PAHs':[8.5, 8.8], 'Si amorphous silicate':[9.6, 9.8],\
                                  'PAHs/SiC':[11.15, 11.35], 'H2O':[11.4, 11.6] ,'Hua':[12.3, 12.6]}
 
-fig,ax = plt.subplots(1,1,figsize=(8,5))
-filt_cont = np.ones(len(all_wvls),dtype=bool)
-for sp in spectral_feature_dictionary_N:
-    filt_tmp = (1e6* np.array(all_wvls) > spectral_feature_dictionary_N[sp][0]) &  (1e6* np.array(all_wvls) < spectral_feature_dictionary_N[sp][1])
+spectral_feature_dictionary = {**spectral_feature_dictionary_k, **spectral_feature_dictionary_LM, ** spectral_feature_dictionary_N }
 
-    filt_cont *=   ~filt_tmp  
-    ax.plot( 1e6* np.array(all_wvls)[filt_tmp], np.array(all_cp)[filt_tmp],'.',label=sp)
-    ax.set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
-    ax.set_ylabel(r'CP [deg]',**fig_kwargs )
 
-ax.plot( 1e6* np.array(all_wvls)[filt_cont], np.array(all_cp)[filt_cont],'.',color='k',label='continuum')    
-ax.legend()
+#build contiuum filter 
+filt_continuum  = np.ones(len(all_wvls),dtype=bool) # to filter out contiuum - we edit it each time we add a spectral feature filter 
+for sp in spectral_feature_dictionary:
+    filt_sp = (1e6* np.array(all_wvls) > spectral_feature_dictionary[sp][0]) &  (1e6* np.array(all_wvls) < spectral_feature_dictionary[sp][1])
+    filt_continuum *= ~filt_sp 
+
+
+pio_H_wvl_filt = (all_wvls > 1.4e-6) & (all_wvls < 1.8e-6) 
+
+gra_K_wvl_filt = (all_wvls > 2.0e-6) & (all_wvls < 2.4e-6) 
+
+mat_L_wvl_filt = (all_wvls > 3.2e-6) & (all_wvls < 3.9e-6) 
+mat_M_wvl_filt = (all_wvls > 4.5e-6) & (all_wvls < 5e-6) 
+mat_N_wvl_filt = (all_wvls > 8e-6) & (all_wvls < 12.1e-6) 
+
+filt_wvl  = pio_H_wvl_filt | gra_K_wvl_filt | mat_L_wvl_filt | mat_M_wvl_filt | mat_N_wvl_filt 
+
+
+fig,ax = plt.subplots(3,1,figsize=(8,12),sharex=True,sharey=True) 
+for i, (conf_lab, conf_filt) in enumerate(zip(configurations, [pequeno_conf, mediano_conf, grande_conf ])):
+    
+    ax[i].plot( 1e6* np.array(all_wvls)[filt_wvl * filt_continuum  & conf_filt], np.array(all_cp)[filt_wvl & filt_continuum & conf_filt],'.',color='k',label='continuum',alpha=0.1)    
+
+    for sp in spectral_feature_dictionary:
+        filt_spL = (1e6* np.array(all_wvls) > spectral_feature_dictionary[sp][0]) &  (1e6* np.array(all_wvls) < spectral_feature_dictionary[sp][1])
+        
+        ax[i].plot( 1e6* np.array(all_wvls)[filt_wvl & filt_spL & conf_filt], np.array(all_cp)[filt_wvl & filt_spL & conf_filt],'.',label=sp, alpha=1)
+    ax[i].set_ylabel(r'CP [deg]',**fig_kwargs )
+    ax[i].text( 9, 150,f'{conf_lab} configurations' )
+ax[-1].set_xlabel(r'wavelength [$\mu$m]',**fig_kwargs )
+ax[0].legend(bbox_to_anchor=(1,1))
+
+plt.savefig(fig_path + 'RTpav_CP_vs_configuration_with_spectral_features.png',dpi=200)
+
+
+
 
 """    
 fig = plt.figure(figsize=(6, 6))

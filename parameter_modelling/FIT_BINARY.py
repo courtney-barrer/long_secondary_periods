@@ -933,7 +933,7 @@ for ins in ins_V2_dict:
         #pos = [mas2rad(5)]
         #nwalkers, ndim = 32,1
         
-        nwalkers = 150 #32
+        nwalkers = 500 #32
         
         # initialize at UD fit (save a table)quick grid search 
         theta0 = mas2rad( ud_wvl ) #rad
@@ -1219,8 +1219,41 @@ for ins in ins_V2_dict:
 
 
 #%% PLOTTING GRAVITY COLORCODING SPECTRAL FEATURE 
+
+
+
+
+# PIONIER
+fig, ax = plt.subplots(1,1, figsize=(10,8) )
+CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(pionier_files, EXTVER=None)
+
+B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
+B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
+B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+
+# I should also use flags! 
+wvl_grid = np.array(list(CP_df.columns))
+
+
+tmp_filt = wvl_grid > 0.1e-6 #(wvl_grid > 8e-6)  & (wvl_grid<9e-6)
+
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[tmp_filt] , CP_df.values[:,tmp_filt],'.',color='k',alpha=0.5)
+
+ax.legend()
+#plt.ylim(-40,40)
+ax.set_ylim(-180,180)
+
+ax.set_xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+ax.set_ylabel('CP [deg]')
+
+
+
+# GRAVITY 
+fig, ax = plt.subplots(1,1, figsize=(10,8) )
 CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(gravity_files, EXTVER=11)
-#CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(pionier_files, EXTVER=None)
+#CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(matisse_files_L, EXTVER=None)
 
 B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
 B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
@@ -1235,27 +1268,81 @@ CO1_filter = ( (wvl_grid<2.298e-6) & (wvl_grid>2.2934e-6 ) )
 CO2_filter = ( (wvl_grid< 2.324e-6 ) & (wvl_grid>2.3226e-6) ) 
 CO3_filter = ( (wvl_grid< 2.3555e-6 ) & (wvl_grid>2.3525e-6 ) ) 
 bg_filter =  ( (wvl_grid< 2.167e-6 ) & (wvl_grid>2.165e-6 ) ) 
+#tmp_filt = wvl_grid > 0.1e-6 #(wvl_grid > 8e-6)  & (wvl_grid<9e-6)
 # ( (wvl_grid<) & (wvl_grid<) ) or ( (wvl_grid<) & (wvl_grid<) )
 #H20_filter = 
 #brackagamma_filter = 
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[(~CO1_filter) & (~CO2_filter) & (~CO3_filter)] , CP_df.values[:,(~CO1_filter) & (~CO2_filter) & (~CO3_filter)],'.',color='k',alpha=0.1)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO1_filter] , CP_df.values[:,CO1_filter],'.',color='red',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO2_filter] , CP_df.values[:,CO2_filter],'.',color='orange',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[CO3_filter] , CP_df.values[:,CO3_filter],'.',color='yellow',alpha=0.9)
-plt.plot( Bmax[:,np.newaxis]/wvl_grid[bg_filter ] , CP_df.values[:,bg_filter ],'.',color='green',alpha=0.9)
-plt.plot( 0, 200,'.',color='red',alpha=0.9,label='CO bandhead (2-0)')
-plt.plot( 0, 200,'.',color='orange',alpha=0.9,label='CO bandhead (3-1)')
-plt.plot( 0, 200,'.',color='yellow',alpha=0.9,label='CO bandhead (4-2)')
-plt.plot( 0, 200,'.',color='green',alpha=0.9,label=r'$br\gamma$')
-plt.legend()
-plt.ylim(-40,40)
+ax.plot( Bmax[:,np.newaxis]/wvl_grid[(~CO1_filter) & (~CO2_filter) & (~CO3_filter)] , CP_df.values[:,(~CO1_filter) & (~CO2_filter) & (~CO3_filter)],'.',color='k',alpha=0.1)
+#plt.plot( Bmax[:,np.newaxis]/wvl_grid[tmp_filt] , CP_df.values[:,tmp_filt],'.',color='k',alpha=0.1)
+ax.plot( Bmax[:,np.newaxis]/wvl_grid[CO1_filter] , CP_df.values[:,CO1_filter],'.',color='red',alpha=0.9)
+ax.plot( Bmax[:,np.newaxis]/wvl_grid[CO2_filter] , CP_df.values[:,CO2_filter],'.',color='orange',alpha=0.9)
+ax.plot( Bmax[:,np.newaxis]/wvl_grid[CO3_filter] , CP_df.values[:,CO3_filter],'.',color='yellow',alpha=0.9)
+ax.plot( Bmax[:,np.newaxis]/wvl_grid[bg_filter ] , CP_df.values[:,bg_filter ],'.',color='green',alpha=0.9)
+ax.plot( 0, 200,'.',color='red',alpha=0.9,label='CO bandhead (2-0)')
+ax.plot( 0, 200,'.',color='orange',alpha=0.9,label='CO bandhead (3-1)')
+ax.plot( 0, 200,'.',color='yellow',alpha=0.9,label='CO bandhead (4-2)')
+ax.plot( 0, 200,'.',color='green',alpha=0.9,label=r'$br\gamma$')
+ax.legend()
+#plt.ylim(-40,40)
+ax.set_ylim(-40,40)
 
-plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
-plt.ylabel('CP [deg]')
+ax.set_xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+ax.set_ylabel('CP [deg]')
 
 
 
 
+# MATISSE L
+fig, ax = plt.subplots(1,1, figsize=(10,8) )
+CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(matisse_files_L, EXTVER=None)
+
+B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
+B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
+B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+
+# I should also use flags! 
+wvl_grid = np.array(list(CP_df.columns))
+
+
+tmp_filt = wvl_grid > 0.1e-6 #(wvl_grid > 8e-6)  & (wvl_grid<9e-6)
+
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[tmp_filt] , CP_df.values[:,tmp_filt],'.',color='k',alpha=0.5)
+
+ax.legend()
+#plt.ylim(-40,40)
+ax.set_ylim(-180,180)
+
+ax.set_xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+ax.set_ylabel('CP [deg]')
+
+
+
+# MATISSE N
+fig, ax = plt.subplots(1,1, figsize=(10,8) )
+CP_df , CPerr_df , CP_flag_df,  CP_obs_df = CP_prep(matisse_files_N, EXTVER=None)
+
+B1 = np.sqrt( CP_df.index.get_level_values('u1')**2 + CP_df.index.get_level_values('v1')**2 )
+B2 = np.sqrt( CP_df.index.get_level_values('u2')**2 + CP_df.index.get_level_values('v2')**2 )
+B3 = np.sqrt( (-CP_df.index.get_level_values('u2')-CP_df.index.get_level_values('u1'))**2 + (- CP_df.index.get_level_values('v2')- CP_df.index.get_level_values('v2'))**2 )
+
+Bmax = np.max([(b1,b2,b3) for b1,b2,b3 in zip(B1,B2,B3)],axis=1)
+
+# I should also use flags! 
+wvl_grid = np.array(list(CP_df.columns))
+
+
+tmp_filt = wvl_grid > 0.1e-6 #(wvl_grid > 8e-6)  & (wvl_grid<9e-6)
+
+plt.plot( Bmax[:,np.newaxis]/wvl_grid[tmp_filt] , CP_df.values[:,tmp_filt],'.',color='k',alpha=0.5)
+
+ax.legend()
+#plt.ylim(-40,40)
+ax.set_ylim(-180,180)
+
+ax.set_xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]')
+ax.set_ylabel('CP [deg]')
 
 
 
