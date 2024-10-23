@@ -22,7 +22,7 @@ import os
 import pickle
 
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/'
+data_path = '/home/rtc/Documents/long_secondary_periods/data/'
 save_path_0 = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/UD/'
 #results_path = '/Users/bencb/Documents/long_secondary_periods/parameter_modelling/RESOLVED_BINARY_RESULTS/'
 

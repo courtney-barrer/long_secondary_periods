@@ -1,0 +1,454 @@
+import numpy as np 
+import matplotlib.pyplot as plt
+from astropy.io import fits 
+import os 
+import glob 
+#import json
+import pandas as pd
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# MAKE SURE THIS IS IN PATH FIRST
+# start new terminal
+#export PATH="$HOME/easy-yorick/bin/:$PATH"
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+data_path = '/home/rtc/Documents/long_secondary_periods/data/merged_files/' 
+
+"""
+instrument
+# MATISSE, GRAVITY, PIONIER
+"""
+instr = 'GRAVITY' #'MATISSE' # MATISSE, GRAVITY, PIONIER
+"""
+keyword
+# keyword must uniquely identify the file merging for given instrument
+
+
+"""
+
+keyword = 'K' #'H'#'N' 
+
+#parameters = 'test_parameters'
+
+#files2image = glob.glob(data_path + f'*{instr}*{keyword}*.fits')  # matisse 
+files2image = glob.glob(data_path + f'*{instr}*SC_P1*.fits') 
+
+# see https://github.com/emmt/MiRA/blob/master/doc/USAGE.md
+
+"""
+prior -> image scale -> regularization 
+
+"""
+
+
+
+
+
+
+#======================================
+# CHANGE THIS FOR DIFFERENT INSTRUMENTS 
+
+#regul = "compactness"
+#intial_img = 'random' #'Dirac' #prior_path +'type-Dirac_FOV-160_pixSc-4.fits' #`--initial=Dirac|random|FILENAME`  param_dict[] #{output_path+'test_prior.fits'} 
+#initImg_fits = fits.open( intial_img )
+#prior_type = 'random'
+
+# for N band draw inspiration from Hofmann 2022
+pixelsize = 2e-6/120 * 1e3 * 3600 * 180/3.14  /5  #9* 1e-6/120 * 1e3 * 3600 * 180/3.14  /4 # lambda/(4 Bmax) (mas) initImg_fits[0].header['CDELT1'] * 3600*1e3 #mas  #wavemin*1e-6/120 * 1e3 * 3600 * 180/3.14  /4 # lambda/(4 Bmax)
+fov = round(64 * pixelsize)  #mas #round( initImg_fits[0].header['CDELT1'] * 3600*1e3 *  initImg_fits[0].header['NAXIS1'],3)  #160 #mas
+#wavegrid = {'CO2-0':[2.2934, 2.298],'CO3-1':[2.322,2.324],'CO4-2':[2.3525,2.3555]}
+wavegrid = {'continuum':[2.1,2.29], 'HeI':[2.038, 2.078], 'MgII':[2.130, 2.150],'Brg':[2.136, 2.196],\
+                                 'NaI':[2.198, 2.218], 'NIII': [2.237, 2.261], 'CO2-0':[2.2934, 2.298],\
+                                   'CO3-1':[2.322,2.324],'CO4-2':[2.3525,2.3555]}
+
+"""
+regularisation 
+
+# (regul=hyperbolic) Edge-preserving smoothness (parameters: mu, tau, eta) | 
+# (regul=compactness) Quadratic compactness (parameters: mu, gamma)
+#  
+"""
+
+
+
+
+"""
+WARNING - Spectral bandwidth smearing is ignored with xform="separable" (set smearingfunction="none" or smearingfactor=0 to avoid this message).
+WARNING - When spectral bandwidth smearing is ignored, xform="nfft" is faster that xform="separable".
+"""
+
+# results_dict = { } # to fill with results for a quick analysis 
+
+mu_grid = np.array([0] + list(np.logspace(0,5,3)) ) # the relative strength of the prior (compared to the data)
+# compactness parameters
+gamma_grid = np.linspace(1,100,3) #full width at half maximum (FWHM) of the prior distribution of light. 
+# for hyperbolic
+tau_grid = np.logspace(-6,0,4) # the edge threshold - sets the transition between the quadratic (l2) and the linear (l1) behavior of total variation (TV)
+#eta_grid = [1] #np.linspace(1,10,1) # the scale of the finite differences to estimate the local gradient of the image.
+
+ftol = -100 # put negative so never convergences on this criterias
+gtol = -100 # put negative so never convergences on this criterias
+
+cnt  = 0
+
+#prior_type = 'Dirac' #'UD' #'random', 'Dirac'  #<- note we keep to variables prior_type and initial_img , one is input an another is for labelling (file naming etc)
+for prior_type in ['Dirac']:    
+
+    feature_names = ['file','chi2','convergence','niter','neval','regPen','prior','regul','mu','gamma','tau','wavemin','wavemax','spectral_feature']
+    results_dict = { } # to fill with results for a quick analysis
+    for f in feature_names:
+        results_dict[f] = []
+
+    if (prior_type !='random') & (prior_type !='Dirac') :
+        prior_path = f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/GRAVITY_K/priors/{prior_type}/' #'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/MATISSE_N/priors/'
+
+    for spec_feat, waverange in wavegrid.items(): #micron - must specify this unit in input ()
+        #print(wavemin)
+        #wavemax = wavemin + np.median(np.diff(wavegrid )) #micron
+        wavemin = waverange[0]
+        wavemax = waverange[1] 
+        if (prior_type !='random') &  (prior_type !='Dirac') :
+            # !!! HAVE TO UPDATE HERE (PRIORS MAY BE WAVELENGTH DEPENDANT)
+            intial_img_files = glob.glob( prior_path + f'*{wavemin}um.fits' ) #<--- very important that this is unique!!! 
+            if len( intial_img_files  ) == 1:
+                intial_img = intial_img_files[0]
+            else:
+                #print( intial_img_files )
+                raise TypeError(f'more than one initial image file available in {prior_path} for given wavelength. SORT THIS OUT FIRST! ')
+            
+        elif prior_type == 'random':
+            intial_img = 'random'
+            bootstrap = 5
+            ftol = -100 # put negative so never convergences on this criterias
+            gtol = 1e-2 #-100 # put negative so never convergences on this criterias
+            xtol = -100 
+
+        elif prior_type == 'Dirac':
+            intial_img = 'Dirac'
+            bootstrap = 1
+            ftol = -100 # put negative so never convergences on this criterias
+            gtol = -100 # put negative so never convergences on this criterias
+            xtol = 0 
+        else:
+            raise TypeError("INVALID prior_type!!!!")
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+        #if (initial_image!='random') | (initial_image!='Dirac') 
+
+        #for intial_img, prior_type in zip(['random'],['random']): #zip(['Dirac'],['Dirac'])#zip(['random','Dirac'],['random','Dirac']):
+        
+        for regul in ['compactness','hyperbolic']:
+            # NOTE FOR GRAVITY WE ALSO LABEL THE SPECTRAL FEATURE NAME
+            output_path = f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/GRAVITY_K/MIRA_prior-{prior_type}_{spec_feat}-wave-{wavemin}-{wavemax}um-reg-{regul}_fov{fov}_pixSc{round(pixelsize,1)}/'
+            # create the path if it doesn't exist 
+            if not os.path.exists(output_path ):
+                os.makedirs(output_path )
+
+            for mu in mu_grid:
+                if regul=='compactness': #Quadratic compactness
+
+                    for gamma in gamma_grid:
+                        
+                        parameters = f'prior-{prior_type}_wave-{wavemin}-{wavemax}_regul-{regul}_mu-{mu}_gamma-{gamma}_fov-{fov}_pixSc-{round(pixelsize,1)}'
+
+                        output_name = f"imageReco_{instr}_{keyword}_{parameters}.fits"
+
+                        # we dont -overwrite
+                        #-wavemin={wavemin}microns -wavemax={wavemax}microns - doesn work - don't know why??? -flux=1
+                        input_str = f"ymira -pixelsize={round(pixelsize,2)}mas -fov={fov}mas -flux=1 -min=0 -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm \
+                        -regul={regul} -mu={mu} -gamma={gamma}mas -ftol={ftol} -gtol={gtol} -xtol={xtol} -maxeval=5000 -maxiter=5000 -verb=10 -smearingfunction=sinc \
+                        -save_visibilities -overwrite -bootstrap={bootstrap} -save_initial -initial={intial_img} -initialhdu=RECO_IMAGE -recenter -use_vis=none -use_vis2=all -use_t3=phi \
+                        -save_dirty_map -save_dirty_beam -save_residual_map {files2image[0]} {output_path+output_name}"
+
+                        #run the mira command on the command line
+                        print( input_str)
+                        os.system(input_str)
+
+                        print( f'{cnt/(4*len(wavegrid)*len(mu_grid)*(len(gamma_grid)*len(gamma_grid) + len(tau_grid)))* 100}% complete') 
+                        cnt += 1
+                        try:
+                            with fits.open(output_path+output_name) as data_tmp:
+
+                                results_dict['file'].append( output_path+output_name )
+                                results_dict['chi2'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] )
+                                results_dict['convergence'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['CONVERGE'] )
+                                results_dict['niter'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['NITER'] )
+                                results_dict['neval'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['NEVAL'] )
+                                results_dict['regPen'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['FPRIOR'] )
+
+                                results_dict['prior'].append( prior_type )
+                                results_dict['regul'].append( regul )
+                                results_dict['mu'].append( mu ) 
+                                results_dict['gamma'].append( gamma ) 
+                                results_dict['tau'].append( np.nan ) 
+                                results_dict['wavemin'].append( wavemin ) 
+                                results_dict['wavemax'].append( wavemax ) 
+                                results_dict['spectral_feature'].append( spec_feat )
+                                """
+                                when we saved to json
+                                chi2 = data_tmp['IMAGE-OI OUTPUT PARAM'].header['CHISQ']
+                                converged = data_tmp['IMAGE-OI OUTPUT PARAM'].header['CONVERGE']
+                                niter = data_tmp['IMAGE-OI OUTPUT PARAM'].header['NITER']
+                                neval = data_tmp['IMAGE-OI OUTPUT PARAM'].header['NEVAL']
+                                regPen = data_tmp['IMAGE-OI OUTPUT PARAM'].header['FPRIOR']
+
+                                results_dict[output_path+output_name] = {'converged':converged,'chi2':chi2,\
+                                                                        'regPen':regPen,'niter':niter,'neval':neval}
+                                """
+                        except:
+                            print(f'failed for {output_path+output_name}')
+                                
+                elif regul=='hyperbolic': 
+                    for tau in tau_grid:
+                        #for eta in eta_grid: we just consider default eta 
+                        #eta-{eta}_
+                        parameters = f'prior-{prior_type}_wave-{wavemin}-{wavemax}_regul-{regul}_mu-{mu}_tau-{tau}_fov-{fov}_pixSc-{round(pixelsize,1)}'
+
+                        output_name = f"imageReco_{instr}_{keyword}_{parameters}.fits"
+
+                        # we dont -overwrite
+                        #-wavemin={wavemin}microns -wavemax={wavemax}microns - doesn work - don't know why??? -flux=1
+                        # NOW WE DO OVERWRITE 
+                        input_str = f"ymira -pixelsize={round(pixelsize,2)}mas -fov={fov}mas -flux=1 -min=0 -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm \
+                        -regul={regul} -mu={mu} -tau={tau} -ftol={ftol} -gtol={gtol} -xtol={xtol} -maxeval=5000 -maxiter=5000 -verb=10 -smearingfunction=sinc \
+                        -save_visibilities -overwrite -bootstrap={bootstrap} -save_initial -initial={intial_img} -initialhdu=RECO_IMAGE -recenter -use_vis=none -use_vis2=all -use_t3=phi \
+                        -save_dirty_map -save_dirty_beam -save_residual_map {files2image[0]} {output_path+output_name}"
+                            
+                        #run the mira command on the command line
+                        os.system(input_str)
+
+                        print( f'{cnt/(4*len(wavegrid)*len(mu_grid)*(len(gamma_grid)*len(gamma_grid) + len(tau_grid)))* 100}% complete') 
+                        cnt += 1
+
+                        try:
+                            with fits.open(output_path+output_name) as data_tmp:
+                                results_dict['file'].append( output_path+output_name )
+                                results_dict['chi2'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] )
+                                results_dict['convergence'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['CONVERGE'] )
+                                results_dict['niter'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['NITER'] )
+                                results_dict['neval'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['NEVAL'] )
+                                results_dict['regPen'].append( data_tmp['IMAGE-OI OUTPUT PARAM'].header['FPRIOR'] )
+
+                                results_dict['prior'].append( prior_type )
+                                results_dict['regul'].append( regul )
+                                results_dict['mu'].append( mu ) 
+                                results_dict['gamma'].append( np.nan ) 
+                                results_dict['tau'].append( tau ) 
+                                results_dict['wavemin'].append( wavemin ) 
+                                results_dict['wavemax'].append( wavemax ) 
+                                results_dict['spectral_feature'].append( spec_feat )
+
+                                """
+                                when we saved to json
+
+                                chi2 = data_tmp['IMAGE-OI OUTPUT PARAM'].header['CHISQ']
+                                converged = data_tmp['IMAGE-OI OUTPUT PARAM'].header['CONVERGE']
+                                niter = data_tmp['IMAGE-OI OUTPUT PARAM'].header['NITER']
+                                neval = data_tmp['IMAGE-OI OUTPUT PARAM'].header['NEVAL']
+                                regPen = data_tmp['IMAGE-OI OUTPUT PARAM'].header['FPRIOR']
+                                
+
+                                results_dict[output_path+output_name] = {'converged':converged,'chi2':chi2,\
+                                                                        'regPen':regPen,'niter':niter,'neval':neval}
+                                """
+
+                        except:
+                            print(f'failed for {output_path+output_name}')
+                                
+    telem = pd.DataFrame( results_dict )
+
+    # I PUT CO BANDS IN FILE NAME HERE 
+    telem.to_csv(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/GRAVITY_K/SUMMARY_RESULTS_CO_bands_IMG_RECO_{prior_type}_{instr}_{keyword}.csv',index=False, header=True) 
+
+#with open(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/MATISSE_N/RESULTS_LIGHT_{instr}_{keyword}.json', 'w') as f:
+#    json.dump(results_dict, f)
+
+
+
+print('===========\ndone\n\n')
+
+
+"""
+TESTIN TOLERANCES ON IMAGE RECONSTRUCTIONS 
+
+
+pixelsize = 8* 1e-6/120 * 1e3 * 3600 * 180/3.14  /5  #9* 1e-6/120 * 1e3 * 3600 * 180/3.14  /4 # lambda/(4 Bmax) (mas) initImg_fits[0].header['CDELT1'] * 3600*1e3 #mas  #wavemin*1e-6/120 * 1e3 * 3600 * 180/3.14  /4 # lambda/(4 Bmax)
+fov = round(128 * pixelsize) 
+mu = 0 # for a random prior we don't want much weighting!!! - more bootstrapping!!! 
+regul='hyperbolic'#'compactness'
+
+
+gamma = 1
+
+intial_img = 'random'#'Dirac'#'random'
+prior_type= 'random'#'Dirac'# 'random'
+wavemin = 11.0
+wavemax = 11.5
+bootstrap = 100
+# we can make this negative so it never converges on the given criteria
+ftol_grid = [-100,0]
+gtol_grid = [-100,0]
+#xtol_grid = np.logspace(-4,0,4) # dont do xtol yet
+
+output_path = f'/home/rtc/Downloads/testing_tolerences/MIRA_prior-{prior_type}_wave-{wavemin}-{wavemax}um-reg-{regul}_fov{fov}_pixSc{round(pixelsize,1)}/'
+if not os.path.exists(output_path ):
+    os.makedirs(output_path )
+
+cnt = 0
+# for ftol in ftol_grid:
+#     for gtol in gtol_grid:
+gtol = -100
+ftol = -100
+xtol = -100
+print(f'{cnt/(len(ftol_grid)*len(gtol_grid))}%')
+parameters = f'prior-{prior_type}_ftol-{ftol}_gtol-{gtol}_wave-{wavemin}-{wavemax}_regul-{regul}_mu-{mu}_gamma-{gamma}_fov-{fov}_pixSc-{round(pixelsize,1)}'
+
+output_name = f"imageReco_{instr}_{keyword}_{parameters}.fits"
+
+# we dont -overwrite
+# NO SEED -seed=0.1
+#we do random prior with seed value = 0.1. grid search over different -ftol=ftol -gtol=gtol. use_vis2=all -use_t3=phi
+if regul=='compactness': 
+    input_str = f"ymira -pixelsize={round(pixelsize,2)}mas -fov={fov}mas -flux=1 -min=0 -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm \
+    -regul={regul} -mu={mu} -gamma={gamma}mas -bootstrap={bootstrap} -ftol={ftol} -gtol={gtol} -xtol={xtol} -maxeval=5000 -maxiter=5000 -verb=10 -smearingfunction=sinc \
+    -save_visibilities -save_initial -initial={intial_img} -initialhdu=RECO_IMAGE  -recenter -use_vis=none -use_vis2=all -use_t3=phi -overwrite \
+    -save_dirty_map -save_dirty_beam -save_residual_map {files2image[0]} {output_path+output_name}"
+elif regul=='hyperbolic': 
+    input_str = f"ymira -pixelsize={round(pixelsize,2)}mas -fov={fov}mas -flux=1 -min=0 -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm \
+    -regul={regul} -mu={mu} -bootstrap={bootstrap} -ftol={ftol} -gtol={gtol} -xtol={xtol} -maxeval=5000 -maxiter=5000 -verb=10 -smearingfunction=sinc \
+    -save_visibilities -save_initial -initial={intial_img} -initialhdu=RECO_IMAGE  -recenter -use_vis=none -use_vis2=all -use_t3=phi -overwrite \
+    -save_dirty_map -save_dirty_beam -save_residual_map {files2image[0]} {output_path+output_name}"
+
+os.system(input_str)
+
+cnt+=1
+
+
+
+
+
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+files = glob.glob(output_path+f'{output_name}')
+#files = glob.glob(output_path+f'*.fits')
+for i,f in enumerate(files):
+    with fits.open(f) as h:
+        #initial_image = data['IMAGE-OI INITIAL IMAGE'].data
+        dirty_beam = h['IMAGE-OI DIRTY BEAM'].data
+        #dirty_map = datatmp['IMAGE-OI DIRTY MAP'].data
+        
+
+        r'$\chi^2$={}'.format( round( h['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) )
+
+        r'$\lambda$ ={}-{}\mu m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 )
+
+        dx = h[0].header['CDELT1'] #mas * 3600 * 1e3
+        x = np.linspace( -h[0].data.shape[0]//2 * dx , h[0].data.shape[0]//2 * dx,  h[0].data.shape[0])
+
+        dy = h[0].header['CDELT2'] #mas * 3600 * 1e3
+        y = np.linspace( -h[0].data.shape[1]//2 * dy , h[0].data.shape[1]//2 * dy,  h[0].data.shape[1])
+
+        origin = 'lower'
+        extent = [np.max(x), np.min(x), np.min(y), np.max(y) ]
+
+        single_plot = False 
+        # the flipping of the image was cross check with pmoired generated images to make sure coordinates were consistent
+        #im = plt.imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+
+        
+        #plt.pcolormesh(x[::-1], y,  h[0].data /h[0].data.max() , cmap='Reds')#, norm=colors.LogNorm(vmin=1e-2, vmax=1))
+
+        if single_plot:
+            fig = plt.figure( figsize=(8,8) )
+            im = plt.imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+
+            plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+            plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+            plt.gca().tick_params(labelsize=15)
+
+            plt.text( -x[2], y[2], 'RT Pav', color='k',fontsize=15)
+            plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+            plt.text( -x[2], y[6], r'$\chi^2$={}'.format( round( h['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+
+            divider = make_axes_locatable(plt.gca())
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            cbar = fig.colorbar( im, cax=cax, orientation='vertical')
+            cbar.set_label( 'Normalized flux', rotation=90,fontsize=15)
+            cbar.ax.tick_params(labelsize=15)      
+
+        else: # we plot dirty beam next to it in subplot
+            fig,ax = plt.subplots( 1,2 , figsize=(12,6) )
+            im = ax[0].imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+            ax[1].imshow( np.fliplr(  dirty_beam/np.max(dirty_beam) ),  cmap='Reds',  extent=extent, origin=origin )
+
+            ax[0].set_ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+            for axx in [ax[0],ax[1]]:
+                axx.set_xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+                axx.tick_params(labelsize=15)
+
+            ax[0].text( x[2], -y[10], 'Image Reco.', color='k',fontsize=15)
+            ax[0].text( x[2], -y[20], 'RT Pav', color='k',fontsize=15)
+            ax[0].text( x[2], -y[30], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+            ax[0].text( x[2], -y[40], r'$\chi^2$={}'.format( round( h['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+            ax[1].text( x[2], -y[10], 'Dirty beam', color='k',fontsize=15)
+            ax[0].set_title( f"{f.split('/')[-1].split('.fits')[0]}" )
+            divider = make_axes_locatable(ax[0])
+            cax = divider.append_axes('top', size='5%', pad=0.05)
+            cbar = fig.colorbar( im, cax=cax, orientation='horizontal')
+            cax.xaxis.set_ticks_position('top')
+            #cbar.set_label( 'Normalized flux', rotation=0,fontsize=15)
+            cbar.ax.tick_params(labelsize=15)    
+
+            divider = make_axes_locatable(ax[1])
+            cax = divider.append_axes('top', size='5%', pad=0.05)
+            cbar = fig.colorbar( im, cax=cax, orientation='horizontal')
+            cax.xaxis.set_ticks_position('top')
+            #cbar.set_label( 'Normalized flux', rotation=0,fontsize=15)
+            cbar.ax.tick_params(labelsize=15)     
+        #cbar = plt.colorbar()
+        #cbar.ax.set_ylabel('Normalized flux',fontsize=15)
+        #cbar.ax.tick_params(labelsize=12)
+
+
+        #cbar.ax.set_yticklabels(ticklabs, fontsize=10)
+        #cbar.ax.set_xlabel(fontsize=15 ) #'Normalize flux')#, rotation=270)
+        tmp_fname = f"{f.split('/')[-1].split('.fits')[0]}.png"
+        plt.savefig( output_path + tmp_fname, dpi=300, bbox_inches='tight')
+
+        plt.show()
+        plt.close()
+        h.close()
+
+
+"""
+
+
+
+
+
+
+"""
+#%% lets read some in to take a look 
+files = glob.glob( output_path+'*fits' )
+
+
+#for f in files[:2]:
+ax_len = round(np.sqrt( len(files) ))
+fig,ax = plt.subplots(ax_len,ax_len,figsize=(20,20))
+
+for f,axx in zip( files, ax.reshape(-1)):
+    with fits.open(f) as data:
+        coverged = data['IMAGE-OI OUTPUT PARAM'].header['CONVERGE']
+        chi2 = data['IMAGE-OI OUTPUT PARAM'].header['CHISQ']
+        final_image = data[0].data 
+        initial_image = data['IMAGE-OI INITIAL IMAGE'].data
+        dirty_beam = data['IMAGE-OI DIRTY BEAM'].data
+        dirty_map = data['IMAGE-OI DIRTY MAP'].data
+        levels = [np.max(dirty_map)/2] # FWHM
+        axx.imshow( final_image ); axx.contour( dirty_map ,colors="white",levels=levels)
+        axx.set_title( f.split('/')[-1] ,fontsize=5)
+        data.close()
+
+plt.savefig(output_path+'summary_plot.png',dpi=300,bbox_inches='tight') 
+plt.show()
+
+"""

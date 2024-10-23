@@ -22,7 +22,7 @@ import os
 import pickle
 
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/'
+data_path = '/home/rtc/Documents/long_secondary_periods/data/'
 
 ins = 'pionier'
 
