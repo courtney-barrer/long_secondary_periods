@@ -22,6 +22,7 @@ import os
 import pickle
 from astropy.io import fits 
 
+from utilities import plot_util
 def pmoiredModel_2_fits( oi, imFov = 200 , name='untitled'):
     """
     save fits files with heade standard required by OImaging so pmoired images can be uploaded as priors
@@ -84,8 +85,8 @@ def pmoiredModel_2_fits( oi, imFov = 200 , name='untitled'):
 
 
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-save_path = '/Users/bencb/Documents/long_secondary_periods/PMOIRED_FITS/play_plots/'
+data_path = '/home/rtc/Documents/long_secondary_periods/data/' # '/Users/bencb/Documents/long_secondary_periods/data/'
+save_path = '/home/rtc/Documents/long_secondary_periods/PMOIRED_FITS/play_plots/'
 ins = 'pionier'
 
 #save_path_0 = f'/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/{ID}/'
@@ -97,7 +98,7 @@ ud_fits = pd.read_csv(data_path + 'UD_fit.csv',index_col=0)
 
 
 
-pionier_files = glob.glob(data_path+f'{ins}/*.fits')
+pionier_files = glob.glob(data_path+f'{ins}/data/*.fits')
 
 
 oi = pmoired.OI(pionier_files)
@@ -106,102 +107,125 @@ oi = pmoired.OI(pionier_files)
 wvl_band_dict =  {'H':[1,2]}
 feature='H'
 
-def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
-    model_col = 'orange'
-    obs_col= 'grey'
-    fsize=18
-    fig_inx = 1 
+### !!! DEFINED IN plot_util.py now !!! !
+# def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
+#     """ compare observed vs modelled V2 and CP 
+#     for oifits loaded in a pmoired object and fitted with a parameteric model 
+#     wavelengths are filtered by the wvl_band_dict
+#     """
+    
+#     model_col = 'orange'
+#     obs_col= 'grey'
+#     fsize=18
+#     fig_inx = 1 
+            
+#     fig2 = plt.figure(2*fig_inx,figsize=(10,8))
+#     fig2.set_tight_layout(True)
+    
+#     frame1=fig2.add_axes((.1,.3,.8,.6))
+#     frame2=fig2.add_axes((.1,.05,.8,.2))  
+    
+#     print( f'plotting all { len( oi._merged) } merged data')
+#     for i in range(len( oi._merged)):
         
-    #=========== for plotting 
-    # filter for the wavelengths we are looking at 
-    wvl_filt = (oi.data[0]['WL'] >= wvl_band_dict[feature][0]) & (oi.data[0]['WL'] <= wvl_band_dict[feature][1])
+#         #=========== for plotting 
+#         # filter for the wavelengths we are looking at 
+#         wvl_filt = (oi.data[i]['WL'] >= wvl_band_dict[feature][0]) & (oi.data[i]['WL'] <= wvl_band_dict[feature][1])
 
-    #===========
+#         #===========
+            
+#         # V2
+#         badflag_filt = (~oi._merged[i]['OI_VIS2']['all']['FLAG'].reshape(-1) ) & (oi._model[i]['OI_VIS2']['all']['V2'].reshape(-1)>0) #& ((oi._model[0]['OI_VIS2']['all']['V2']>0).reshape(-1))
         
-    # V2
-    badflag_filt = (~oi._merged[0]['OI_VIS2']['all']['FLAG'].reshape(-1) ) & (oi._model[0]['OI_VIS2']['all']['V2'].reshape(-1)>0) #& ((oi._model[0]['OI_VIS2']['all']['V2']>0).reshape(-1))
-    
-    wvl_plot_filt = np.array( [wvl_filt for _ in range(oi._merged[0]['OI_VIS2']['all']['FLAG'].shape[0] )] ).reshape(-1)
-    
-    flag_filt = badflag_filt & wvl_plot_filt
-    
-    
-    fig2 = plt.figure(2*fig_inx,figsize=(10,8))
-    fig2.set_tight_layout(True)
-    
-    frame1=fig2.add_axes((.1,.3,.8,.6))
-    frame2=fig2.add_axes((.1,.05,.8,.2))  
-    
-    
-    # data 
-    frame1.errorbar(oi._merged[0]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._merged[0]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt], yerr = oi._merged[0]['OI_VIS2']['all']['EV2'].reshape(-1)[flag_filt],color=obs_col, label='obs',alpha=0.9,fmt='.')
-    # model
-    frame1.plot(oi._model[0]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._model[0]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt],'.',label='model', color=model_col)
-    
-    binned_chi2 = (oi._merged[0]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt]-oi._model[0]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt])**2 / oi._merged[0]['OI_VIS2']['all']['EV2'].reshape(-1)[flag_filt]**2
-    frame2.plot( oi._merged[0]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  binned_chi2, '.', color='k' )
-    
-    #frame1.text(10,0.2,feature,fontsize=15)
-    
-    if logV2:
-        frame1.set_yscale('log')
+#         wvl_plot_filt = np.array( [wvl_filt for _ in range(oi._merged[i]['OI_VIS2']['all']['FLAG'].shape[0] )] ).reshape(-1)
         
-    frame2.set_xlabel(r'$B/\lambda\ [M rad^{-1}]$',fontsize=fsize)
-    frame1.set_ylabel(r'$V^2$',fontsize=fsize)
-    frame2.set_ylabel(r'$\chi^2$',fontsize=fsize)
-    frame2.set_yscale('log')
-    frame1.set_xticks( [])
-    frame1.set_ylim([0,1])
-    frame1.legend(fontsize=fsize)
-    frame1.tick_params( labelsize=fsize )
-    frame2.tick_params( labelsize=fsize )
-    frame2.axhline(1,color='grey',ls=':')
+#         flag_filt = badflag_filt & wvl_plot_filt
     
-    #plt.savefig( save_path + f'{ins}_{feature}_pmoired_BESTFIT_V2_PLOT_{ID}.png', bbox_inches='tight', dpi=300)  
+
+#         if i == 0: # include legend label
+#             # data 
+#             frame1.errorbar(oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._merged[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt], yerr = oi._merged[i]['OI_VIS2']['all']['EV2'].reshape(-1)[flag_filt],color=obs_col, label='obs',alpha=0.9,fmt='.')
+        
+#             # model
+#             frame1.plot(oi._model[i]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._model[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt],'.',label='model', color=model_col)
+#         else: 
+#             # data 
+#             frame1.errorbar(oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._merged[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt], yerr = oi._merged[i]['OI_VIS2']['all']['EV2'].reshape(-1)[flag_filt],color=obs_col,alpha=0.9,fmt='.')
+        
+#             # model
+#             frame1.plot(oi._model[i]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  oi._model[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt],'.', color=model_col)
+            
+            
+#         binned_chi2 = (oi._merged[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt]-oi._model[i]['OI_VIS2']['all']['V2'].reshape(-1)[flag_filt])**2 / oi._merged[i]['OI_VIS2']['all']['EV2'].reshape(-1)[flag_filt]**2
+#         frame2.plot( oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1)[flag_filt],  binned_chi2, '.', color='k' )
+        
+#     #frame1.text(10,0.2,feature,fontsize=15)
+    
+#     if logV2:
+#         frame1.set_yscale('log')
+        
+#     frame2.set_xlabel(r'$B/\lambda\ [M rad^{-1}]$',fontsize=fsize)
+#     frame1.set_ylabel(r'$V^2$',fontsize=fsize)
+#     frame2.set_ylabel(r'$\chi^2$',fontsize=fsize)
+#     frame2.set_yscale('log')
+#     frame1.set_xticks( [])
+#     frame1.set_ylim([0,1])
+#     frame1.legend(fontsize=fsize)
+#     frame1.tick_params( labelsize=fsize )
+#     frame2.tick_params( labelsize=fsize )
+#     frame2.axhline(1,color='grey',ls=':')
+    
+#     #plt.savefig( save_path + f'{ins}_{feature}_pmoired_BESTFIT_V2_PLOT_{ID}.png', bbox_inches='tight', dpi=300)  
       
-    if savefig_folder!=None:
-        plt.savefig( savefig_folder + f'{savefig_name}_V2.png' , bbox_inches='tight', dpi=300)
+#     if savefig_folder!=None:
+#         plt.savefig( savefig_folder + f'{savefig_name}_V2.png' , bbox_inches='tight', dpi=300)
         
-    #CP
-    badflag_filt = (~oi._merged[0]['OI_T3']['all']['FLAG'].reshape(-1) ) 
+        
+#     ########
+#     #CP
+#     ########
+
+#     fig3 = plt.figure(3 * fig_inx,figsize=(10,8))
+#     fig3.set_tight_layout(True)
     
-    wvl_plot_filt = np.array( [wvl_filt for _ in range(oi._merged[0]['OI_T3']['all']['FLAG'].shape[0] )] ).reshape(-1)
-    
-    flag_filt = badflag_filt & wvl_plot_filt
-    
-    
-    fig3 = plt.figure(3 * fig_inx,figsize=(10,8))
-    fig3.set_tight_layout(True)
-    
-    frame1=fig3.add_axes((.1,.3,.8,.6))
-    frame2=fig3.add_axes((.1,.05,.8,.2))  
+#     frame1=fig3.add_axes((.1,.3,.8,.6))
+#     frame2=fig3.add_axes((.1,.05,.8,.2))  
     
     
-    # data 
-    frame1.errorbar(oi._merged[0]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt],  oi._merged[0]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt], yerr = oi._merged[0]['OI_T3']['all']['ET3PHI'].reshape(-1)[flag_filt],color=obs_col, label='obs',alpha=0.9,fmt='.')
-    # model
-    frame1.plot(oi._model[0]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt],  oi._model[0]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt],'.',label='model', color=model_col)
+#     # data 
+#     for i in range(len( oi._merged)):    
+#         badflag_filt = (~oi._merged[i]['OI_T3']['all']['FLAG'].reshape(-1) ) 
+        
+#         wvl_plot_filt = np.array( [wvl_filt for _ in range(oi._merged[i]['OI_T3']['all']['FLAG'].shape[0] )] ).reshape(-1)
+        
+#         flag_filt = badflag_filt & wvl_plot_filt
+        
+        
+#         frame1.errorbar(oi._merged[i]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt],  oi._merged[i]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt], yerr = oi._merged[i]['OI_T3']['all']['ET3PHI'].reshape(-1)[flag_filt],color=obs_col, label='obs',alpha=0.9,fmt='.')
+#         # model
+#         frame1.plot(oi._model[i]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt],  oi._model[i]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt],'.',label='model', color=model_col)
+        
+#         binned_chi2 = (oi._merged[i]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt]-oi._model[i]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt])**2 / oi._merged[i]['OI_T3']['all']['ET3PHI'].reshape(-1)[flag_filt]**2
+#         frame2.plot( oi._merged[i]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt], binned_chi2, '.', color='k')
     
-    binned_chi2 = (oi._merged[0]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt]-oi._model[0]['OI_T3']['all']['T3PHI'].reshape(-1)[flag_filt])**2 / oi._merged[0]['OI_T3']['all']['ET3PHI'].reshape(-1)[flag_filt]**2
-    frame2.plot( oi._merged[0]['OI_T3']['all']['Bmax/wl'].reshape(-1)[flag_filt], binned_chi2, '.', color='k')
-    frame2.axhline(1,color='grey',ls=':')
+#     frame2.axhline(1,color='grey',ls=':')
     
-    #frame1.text(10,10,feature,fontsize=15)
+#     #frame1.text(10,10,feature,fontsize=15)
     
-    #if logV2:
-    #    plt.yscale('log')
-    frame2.set_xlabel(r'$B_{max}/\lambda\ [M rad^{-1}]$',fontsize=fsize)
-    frame1.set_ylabel(r'$CP$ [deg]',fontsize=fsize)
-    frame2.set_ylabel(r'$\chi^2$',fontsize=fsize)
-    frame1.set_ylim([-CP_ylim, CP_ylim])
-    frame2.set_yscale('log')
-    frame1.legend(fontsize=fsize)
-    frame1.set_xticks( [])
-    frame1.tick_params( labelsize=fsize )
-    frame2.tick_params( labelsize=fsize )
+#     #if logV2:
+#     #    plt.yscale('log')
+#     frame2.set_xlabel(r'$B_{max}/\lambda\ [M rad^{-1}]$',fontsize=fsize)
+#     frame1.set_ylabel(r'$CP$ [deg]',fontsize=fsize)
+#     frame2.set_ylabel(r'$\chi^2$',fontsize=fsize)
+#     frame1.set_ylim([-CP_ylim, CP_ylim])
+#     frame2.set_yscale('log')
+#     frame1.legend(fontsize=fsize)
+#     frame1.set_xticks( [])
+#     frame1.tick_params( labelsize=fsize )
+#     frame2.tick_params( labelsize=fsize )
     
-    if savefig_folder!=None:
-        plt.savefig( savefig_folder + f'{savefig_name}_CP.png' , bbox_inches='tight', dpi=300)
+#     if savefig_folder!=None:
+#         plt.savefig( savefig_folder + f'{savefig_name}_CP.png' , bbox_inches='tight', dpi=300)
     
     
    
@@ -226,10 +250,9 @@ oi.doFit(outflow_model, doNotFit=['*,f','*,ud'] )#,'e,projang','e,incl'])
 
 
     
-plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots')
+plot_util.plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots')
 # %% point source companion
 outflow_model = {'*,ud':3.311,'*,f':1,'c,ud':0,'c,x':-2,'c,y':0,'c,f':0.06}
-
 
 oi.setupFit({'obs':['V2', 'T3PHI'], 
              'min relative error':{'V2':0.01},
@@ -240,9 +263,9 @@ oi.doFit(outflow_model, doNotFit=['*,f','*,ud','c,ud'] )#,'e,projang','e,incl'])
 
 #oi.showModel(outflow_model  ,imFov=20, showSED=False)
 
-#plotV2CP( oi ,wvl_band_dict, feature)
+#plot_util.plotV2CP( oi ,wvl_band_dict, feature)
 
-plotV2CP( oi ,wvl_band_dict, feature, CP_ylim=180, logV2 = True, savefig_folder=save_path, savefig_name=f'pionier_{wvl_band_dict[feature]}_binNone_binary_fit') 
+plot_util.plotV2CP( oi ,wvl_band_dict, feature, CP_ylim=180, logV2 = True, savefig_folder=None, savefig_name=None ) #f'pionier_{wvl_band_dict[feature]}_binNone_binary_fit') 
 
     
 #%% Try ellipse where we see chi2 trench 
@@ -260,7 +283,7 @@ oi.doFit(outflow_model, doNotFit=['*,f', '*,ud'] )#,'e,projang','e,incl'])
 
 oi.showModel(outflow_model  ,imFov=20, showSED=False)
 
-plotV2CP( oi ,wvl_band_dict, feature)
+plot_util.plotV2CP( oi ,wvl_band_dict, feature)
 
 #%% Try Disk 
 
@@ -277,7 +300,7 @@ oi.doFit(outflow_model, doNotFit=['*,f', '*,ud'] )#,'e,projang','e,incl'])
 
 oi.showModel(outflow_model  ,imFov=20, showSED=False)
 
-plotV2CP( oi ,wvl_band_dict, feature)
+plot_util.plotV2CP( oi ,wvl_band_dict, feature)
 
 
 
@@ -443,7 +466,7 @@ obs_col= 'grey'
 fsize=18
 
 # seperation in au 
-13 *1e-3/3600 * np.pi/180 * 206265 * 520
+13 * 1e-3/3600 * np.pi/180 * 206265 * 520
 #then from keplers law we can find combined mass 
 
 # V2
