@@ -204,4 +204,136 @@ for prior in ['UD','random','Dirac']:
     """
     
     
-    #
+
+#################################
+## Testing comparison of model and data from image reconstruction!!!! 
+#################################
+
+## 
+# root path to save best images as png files
+what_imgs = 'BEST' #'ALL' #'BEST'
+fig_path = f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/PIONIER_H/{what_imgs}_IMAGES/'
+
+instr = 'PIONIER'
+keyword = 'H'
+#prior= 'UD'#'Dirac' #'UD' #'random' #'Dirac'
+"""
+25-7-24 note: I over rode RESULTS_LIGHT_{instr}_{keyword} for Dirac prior - so only have for random prior 
+"""
+#res_df = pd.read_csv(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/MATISSE_N/RESULTS_LIGHT_{instr}_{keyword}.csv')
+for prior in ['UD','random','Dirac']:
+    res_df = pd.read_csv(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/{instr}_{keyword}/SUMMARY_RESULTS_IMG_RECO_{prior}_{instr}_{keyword}.csv') #RESULTS_LIGHT_{instr}_{keyword}.csv')
+
+    # add a distance metric from chi2=1
+    res_df['fit_metric'] = abs(res_df['chi2']-1) 
+    #plt.ion()
+
+    for w in np.unique(res_df['wavemin']):
+
+        # create a new folder f or wavelength if it doesn't exist
+        if not os.path.exists(fig_path + f'{w}um/'):
+            os.makedirs(fig_path + f'{w}um/')
+
+        tmp_fig_path = fig_path + f'{w}um/'
+        for reg in np.unique(res_df['regul']):
+            filt = (res_df['wavemin'] == w) & (res_df['regul'] == reg)
+            if what_imgs == 'ALL':
+                top10files = res_df[filt].sort_values('fit_metric')['file'].values
+                top10mu = res_df[filt].sort_values('fit_metric')['mu'].values
+                top10chi2 = res_df[filt].sort_values('fit_metric')['chi2'].values
+
+            elif what_imgs == 'BEST': # get top 10 
+                top10files = res_df[filt].sort_values('fit_metric')['file'][:10].values
+                top10mu = res_df[filt].sort_values('fit_metric')['mu'][:10].values
+                top10chi2 = res_df[filt].sort_values('fit_metric')['chi2'][:10].values
+
+
+top10files
+
+d_model = fits.open( top10files[1] )
+
+visamp = d_model['IMAGE-OI MODEL VISIBILITIES'].data['model_visamp'] 
+visphi = d_model['IMAGE-OI MODEL VISIBILITIES'].data['model_visphi'] 
+ucoord = d_model['IMAGE-OI MODEL VISIBILITIES'].data['ucoord  '] 
+vcoord = d_model['IMAGE-OI MODEL VISIBILITIES'].data['vcoord  '] 
+effwvl = d_model['IMAGE-OI MODEL VISIBILITIES'].data['eff_wave'] 
+im = d_model[0].data 
+
+  d_model[IMAGE-OI OUTPUT PARAM'].data
+
+plt.figure() 
+plt.imshow( im )
+plt.show() 
+
+
+### Now read in the OI data and compare with the model
+import glob
+import pmoired 
+#data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
+data_path = '/home/rtc/Documents/long_secondary_periods/data/' # '/Users/bencb/Documents/long_secondary_periods/data/'
+
+pionier_files = glob.glob(data_path+f'pionier/data/*.fits')
+
+oi = pmoired.OI(pionier_files)
+
+wvl_min = np.min( 1e-3 * d_model[6].data['eff_wave'] )
+wvl_max = np.max( 1e-3 * d_model[6].data['eff_wave'] )
+
+oi.setupFit({'obs':['V2', 'T3PHI'], 'wl ranges':[[wvl_min, wvl_max]] })
+oi.doFit({'*,ud':3.311})
+
+
+plt.figure() 
+for i in range(len( oi._merged )):
+    utmp = oi._merged[i]['OI_VIS2']['all']['u']
+    vtmp = oi._merged[i]['OI_VIS2']['all']['v']
+    vis2tmp = oi._merged[i]['OI_VIS2']['all']['V2'].reshape(-1)
+    vis2errtmp = oi._merged[i]['OI_VIS2']['all']['EV2'].reshape(-1)
+    #np.sqrt( utmp**2 + vtmp**2) 
+    plt.errorbar( oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1),  vis2tmp , yerr = vis2errtmp,\
+        color='k', label='obs',alpha=0.9,fmt='.')
+    
+plt.figure() 
+plt.plot( np.sqrt( (ucoord**2 + vcoord**2 )**0.5 ) /effwvl , abs(visamp)**2, '.', label='model', color='r')
+plt.yscale('log')   
+plt.show()
+
+plt.figure() 
+plt.plot( np.sqrt( (np.unique( ucoord )**2 + np.unique( vcoord )**2 )**0.5/eff_wvl ) , abs(visamp)**2, '.', label='model', color='r')
+plt.yscale('log')   
+plt.show()
+
+plt.figure() 
+plt.plot( effwvl , abs(visamp)**2, '.', label='model', color='r')
+plt.yscale('log')   
+plt.show()
+
+
+uu = ucoord.reshape(  6 ,-1) # -1, np.unique( effwvl ).shape [ 0] )
+vv = vcoord.reshape(  6, -1)  # -1,np.unique( effwvl ).shape [ 0] )
+vamp = visamp.reshape( 6 ,-1) #  -1, np.unique( effwvl ).shape [ 0] )
+
+plt.figure()
+for i in [3] : #range(len( uu )):
+    plt.plot( uu[i]**2 + vv[i]**2 , vamp[i]  )
+
+plt.show() 
+
+################
+# VERIFY PMOIRED AND MIRA RESULTS (COORDINATES) ARE CONSISTENT 
+plt.figure()
+var = ('v', np.unique( vcoord)  ) 
+tmp_list = []
+for i in range(len( oi._merged )):
+    tmp_list.append( abs(oi._merged[i]['OI_VIS2']['all'][var[0]]) )
+   
+plt.hist(  [x for xs in tmp_list for x in xs], alpha =0.5,  label = 'pmoired u ')#  oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1) ,label = 'pmoired B/wl' , alpha =0.5 )
+
+plt.hist( abs( var[1] ) ,alpha = 0.5, label='Mira u coord' ) #(ucoord**2 + vcoord**2 )**0.5 / (1e-6 * effwvl)  ,label='Mira model (u^2+v^2)^0.5', alpha =0.5)
+plt.legend()
+plt.show()
+
+
+oi._merged[i]['OI_VIS2']['all']['u']
+
+

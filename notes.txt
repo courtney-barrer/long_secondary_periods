@@ -1,0 +1,20 @@
+note to self copying some things over from old ANU mac (Mikes). If missing files look there. 
+don't pull into that branch
+
+
+28/10/12
+-merged and pulled long_secondary_periods to include all the PMOIRED fits with the MiRA image reconstructions 
+-after merge tested PLAY_PIONIER.py and image reconstructions
+
+-created plot_utils.py and fixed some plot bugs with oi_merged[i]
+-confirmed with ERIC that we need to construct CP from MirA returned visibilities
+- in process tp verify consistency between oi fits of 
+observed data and the coordinates / observables returned by MiRA
+.. doing this in MIRA_imageReco_analysis_PIONIER.py first
+
+
+issue with returned visibilities in Mira models 
+emailed Eric about it.
+
+Testing in 
+MIRA_imageReco_analysis_PIONIER.py

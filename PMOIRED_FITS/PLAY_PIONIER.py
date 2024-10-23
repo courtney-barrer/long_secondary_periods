@@ -107,7 +107,7 @@ oi = pmoired.OI(pionier_files)
 wvl_band_dict =  {'H':[1,2]}
 feature='H'
 
-### !!! DEFINED IN plot_util.py now !!! !
+### !!! DEFINED IN plot_util.py now !!! 
 # def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
 #     """ compare observed vs modelled V2 and CP 
 #     for oifits loaded in a pmoired object and fitted with a parameteric model 
