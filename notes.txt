@@ -2,7 +2,7 @@ note to self copying some things over from old ANU mac (Mikes). If missing files
 don't pull into that branch
 
 
-28/10/12
+23/10/12
 -merged and pulled long_secondary_periods to include all the PMOIRED fits with the MiRA image reconstructions 
 -after merge tested PLAY_PIONIER.py and image reconstructions
 
@@ -18,3 +18,48 @@ emailed Eric about it.
 
 Testing in 
 MIRA_imageReco_analysis_PIONIER.py
+
+25/10/12
+
+cloned to personal desktop (ubuntu 24.04). Havent set up requirementes file yet 
+added pionier data locally at 
+/home/benja/Documents/long_secondary_periods/data/pionier/data
+
+found how to properly make fake observations from data 
+
+oif.data = [pmoired.oifake.makeFakeVLTI(\
+    t= a['telescopes'],\
+    target = ( a['header']['RA']* 24 / 360 , a['header']['DEC'] ),\
+    lst = [a['LST']], \
+    wl = a['WL'], \
+    mjd0 = a[ 'MJD'][0],\
+    cube = cube ) for a in oi.data]
+
+using pmoired.OI(files) by default uses dMJD=0 which creates blocks 
+based on dMJD of observations. Set this to 1e9 to isolate each individual obs
+
+I had tried merging :
+bb =pmoired.oifits.mergeOI(oif.data, collapse = True, dMJD = None)
+with different dMJD but plots seem inconsistent .
+
+TRY NOW JUST SEPERATE OBS FOR EACH AND PLOT EACH WITH SPECIFIC KEYS
+(Since keys are not always in order)
+
+Calculate the actualy Chi2 from the obs to image reconstruction - does it match MiRA?
+
+
+26/10/24
+seems to be some inconsitency with 
+oi.data[i]['OI_T3'][b]['Bmax/wl'][0] 
+oif.data[i]['OI_T3'][b]['Bmax/wl'][0] 
+for larger baselines.. hack fix is to 
+always plot against 
+oi.data[i]['OI_T3'][b]['Bmax/wl']
+-seems to work fine since order of data in both model and obs is consistent
+
+
+Changed calc of chi2 for CP in im reco calc
+(1-np.cos( T3_data[flag_filt]-T3_model[flag_filt])
+NEED TO DO THE SAME FOR PLOT UTIL!!!
+
+Careful - T3 is in degrees not radians- convert in cosine

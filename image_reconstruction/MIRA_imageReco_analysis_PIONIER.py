@@ -250,90 +250,32 @@ for prior in ['UD','random','Dirac']:
 
 top10files
 
-d_model = fits.open( top10files[1] )
+#
 
-visamp = d_model['IMAGE-OI MODEL VISIBILITIES'].data['model_visamp'] 
-visphi = d_model['IMAGE-OI MODEL VISIBILITIES'].data['model_visphi'] 
-ucoord = d_model['IMAGE-OI MODEL VISIBILITIES'].data['ucoord  '] 
-vcoord = d_model['IMAGE-OI MODEL VISIBILITIES'].data['vcoord  '] 
-effwvl = d_model['IMAGE-OI MODEL VISIBILITIES'].data['eff_wave'] 
-im = d_model[0].data 
-
-  d_model[IMAGE-OI OUTPUT PARAM'].data
-
-plt.figure() 
-plt.imshow( im )
-plt.show() 
-
-
-### Now read in the OI data and compare with the model
+from utilities import plot_util
 import glob
-import pmoired 
-#data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/home/rtc/Documents/long_secondary_periods/data/' # '/Users/bencb/Documents/long_secondary_periods/data/'
+import pmoired
+import matplotlib.pyplot as plt
+import numpy as np
+image_file = '/home/benja/Downloads/imageReco_PIONIER_H_prior-UD_wave-1.4-1.7999999999999998_regul-hyperbolic_mu-46415.888336127726_tau-0.1_fov-35_pixSc-0.6.fits' 
+data_path = '/home/benja/Documents/long_secondary_periods/data/'
+obs_files = glob.glob(data_path+'pionier/data/*.fits')
 
-pionier_files = glob.glob(data_path+f'pionier/data/*.fits')
+# oi is observed, oif is fake observations generated from image reconstruction 
+# at UV samples of the observed data
+oi, oif = plot_util.simulate_obs_from_image_reco( obs_files, image_file )
 
-oi = pmoired.OI(pionier_files)
+kwargs =  {
+    'wvl_lims':[-np.inf, np.inf],\
+    'model_col': 'orange',\
+    'obs_col':'grey',\
+    'fsize':18,\
+    'logV2':True,\
+    'ylim':[0,1],
+    'CPylim':180
+    } # 'CP_ylim':180,
 
-wvl_min = np.min( 1e-3 * d_model[6].data['eff_wave'] )
-wvl_max = np.max( 1e-3 * d_model[6].data['eff_wave'] )
-
-oi.setupFit({'obs':['V2', 'T3PHI'], 'wl ranges':[[wvl_min, wvl_max]] })
-oi.doFit({'*,ud':3.311})
-
-
-plt.figure() 
-for i in range(len( oi._merged )):
-    utmp = oi._merged[i]['OI_VIS2']['all']['u']
-    vtmp = oi._merged[i]['OI_VIS2']['all']['v']
-    vis2tmp = oi._merged[i]['OI_VIS2']['all']['V2'].reshape(-1)
-    vis2errtmp = oi._merged[i]['OI_VIS2']['all']['EV2'].reshape(-1)
-    #np.sqrt( utmp**2 + vtmp**2) 
-    plt.errorbar( oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1),  vis2tmp , yerr = vis2errtmp,\
-        color='k', label='obs',alpha=0.9,fmt='.')
-    
-plt.figure() 
-plt.plot( np.sqrt( (ucoord**2 + vcoord**2 )**0.5 ) /effwvl , abs(visamp)**2, '.', label='model', color='r')
-plt.yscale('log')   
-plt.show()
-
-plt.figure() 
-plt.plot( np.sqrt( (np.unique( ucoord )**2 + np.unique( vcoord )**2 )**0.5/eff_wvl ) , abs(visamp)**2, '.', label='model', color='r')
-plt.yscale('log')   
-plt.show()
-
-plt.figure() 
-plt.plot( effwvl , abs(visamp)**2, '.', label='model', color='r')
-plt.yscale('log')   
-plt.show()
-
-
-uu = ucoord.reshape(  6 ,-1) # -1, np.unique( effwvl ).shape [ 0] )
-vv = vcoord.reshape(  6, -1)  # -1,np.unique( effwvl ).shape [ 0] )
-vamp = visamp.reshape( 6 ,-1) #  -1, np.unique( effwvl ).shape [ 0] )
-
-plt.figure()
-for i in [3] : #range(len( uu )):
-    plt.plot( uu[i]**2 + vv[i]**2 , vamp[i]  )
-
-plt.show() 
-
-################
-# VERIFY PMOIRED AND MIRA RESULTS (COORDINATES) ARE CONSISTENT 
-plt.figure()
-var = ('v', np.unique( vcoord)  ) 
-tmp_list = []
-for i in range(len( oi._merged )):
-    tmp_list.append( abs(oi._merged[i]['OI_VIS2']['all'][var[0]]) )
-   
-plt.hist(  [x for xs in tmp_list for x in xs], alpha =0.5,  label = 'pmoired u ')#  oi._merged[i]['OI_VIS2']['all']['B/wl'].reshape(-1) ,label = 'pmoired B/wl' , alpha =0.5 )
-
-plt.hist( abs( var[1] ) ,alpha = 0.5, label='Mira u coord' ) #(ucoord**2 + vcoord**2 )**0.5 / (1e-6 * effwvl)  ,label='Mira model (u^2+v^2)^0.5', alpha =0.5)
-plt.legend()
-plt.show()
-
-
-oi._merged[i]['OI_VIS2']['all']['u']
+v2dict = plot_util.compare_V2_obs_vs_image_reco(oi, oif, return_data=True, savefig=None, **kwargs)
+cpdict = plot_util.compare_CP_obs_vs_image_reco(oi, oif, return_data=True, savefig=None, **kwargs)
 
 
