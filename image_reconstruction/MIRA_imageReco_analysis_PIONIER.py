@@ -6,6 +6,16 @@ import os
 #import glob 
 #import json
 import pandas as pd 
+import glob
+import pmoired
+import matplotlib.pyplot as plt
+import numpy as np
+import json 
+import importlib
+
+from utilities import plot_util
+comp_loc = 'ANU'
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
 
 """
 Analysing output from MIRA_image_reconstruction.py
@@ -19,7 +29,7 @@ image reconstruction.
 """
 # root path to save best images as png files
 what_imgs = 'BEST' #'ALL' #'BEST'
-fig_path = f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/PIONIER_H/{what_imgs}_IMAGES/'
+fig_path = path_dict[comp_loc]["root"] + f'image_reconstruction/image_reco/PIONIER_H/{what_imgs}_IMAGES/'
 
 instr = 'PIONIER'
 keyword = 'H'
@@ -29,7 +39,7 @@ keyword = 'H'
 """
 #res_df = pd.read_csv(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/MATISSE_N/RESULTS_LIGHT_{instr}_{keyword}.csv')
 for prior in ['UD','random','Dirac']:
-    res_df = pd.read_csv(f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/{instr}_{keyword}/SUMMARY_RESULTS_IMG_RECO_{prior}_{instr}_{keyword}.csv') #RESULTS_LIGHT_{instr}_{keyword}.csv')
+    res_df = pd.read_csv(path_dict[comp_loc]["root"] + f'image_reconstruction/image_reco/{instr}_{keyword}/SUMMARY_RESULTS_IMG_RECO_{prior}_{instr}_{keyword}.csv') #RESULTS_LIGHT_{instr}_{keyword}.csv')
 
     #qick look at distribution of chi2 
     #plt.figure()
@@ -211,7 +221,7 @@ for prior in ['UD','random','Dirac']:
 
 ## 
 # root path to save best images as png files
-what_imgs = 'BEST' #'ALL' #'BEST'
+what_imgs = 'ALL' #'ALL' #'BEST'
 fig_path = f'/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/PIONIER_H/{what_imgs}_IMAGES/'
 
 instr = 'PIONIER'
@@ -252,14 +262,12 @@ top10files
 
 #
 
-from utilities import plot_util
-import glob
-import pmoired
-import matplotlib.pyplot as plt
-import numpy as np
-image_file = '/home/benja/Downloads/imageReco_PIONIER_H_prior-UD_wave-1.4-1.7999999999999998_regul-hyperbolic_mu-46415.888336127726_tau-0.1_fov-35_pixSc-0.6.fits' 
-data_path = '/home/benja/Documents/long_secondary_periods/data/'
-obs_files = glob.glob(data_path+'pionier/data/*.fits')
+'image_reconstruction/image_reco/PIONIER_H/priors/UD/best_UD_PRIOR_MATISSE_1.4um.fits'
+image_file = 'image_reconstruction/image_reco/PIONIER_H/priors/UD/best_UD_PRIOR_MATISSE_1.4um.fits'#top10files[-1] #'/home/benja/Downloads/imageReco_PIONIER_H_prior-UD_wave-1.4-1.7999999999999998_regul-hyperbolic_mu-46415.888336127726_tau-0.1_fov-35_pixSc-0.6.fits' 
+#data_path = #'/home/benja/Documents/long_secondary_periods/data/'
+obs_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits')
+
+im_reco_fits =fits.open(image_file)
 
 # oi is observed, oif is fake observations generated from image reconstruction 
 # at UV samples of the observed data
@@ -275,7 +283,27 @@ kwargs =  {
     'CPylim':180
     } # 'CP_ylim':180,
 
+plt.figure(101)
+plt.imshow( np.log10( im_reco_fits[0].data ) )
+plt.colorbar() 
+#plt.title( r'$\chi^2_{\nu}=$' + f'{round(im_reco_fits[2].header['CHISQ'],2)}' ) 
 v2dict = plot_util.compare_V2_obs_vs_image_reco(oi, oif, return_data=True, savefig=None, **kwargs)
 cpdict = plot_util.compare_CP_obs_vs_image_reco(oi, oif, return_data=True, savefig=None, **kwargs)
+plt.show()
+
+def extract_all_values( dictionary , key):
+    vals= []
+    for k in dictionary[key]:
+        for b in dictionary[key][k]:
+            vals.append( dictionary[key][k][b] )
+            
+    flattened_list = [item for sublist in vals for item in sublist]
+    return np.array(flattened_list)
+
+v2chi2 = extract_all_values( v2dict, 'chi2')
+cpchi2 = extract_all_values( cpdict, 'chi2')
+v2res = extract_all_values( v2dict, 'residuals')
+cpres = extract_all_values( cpdict, 'residuals')
 
 
+plt.show()

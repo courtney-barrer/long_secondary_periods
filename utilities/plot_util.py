@@ -183,7 +183,8 @@ def simulate_obs_from_image_reco( obs_files, image_file ):
     img = d_model[0].data
 
     assert d_model[0].header['CUNIT2'] == d_model[0].header['CUNIT1']
-    assert d_model[0].header['CDELT2'] == d_model[0].header['CDELT1']
+    # we assert the image has to be square..
+    assert abs(d_model[0].header['CDELT2']) == abs(d_model[0].header['CDELT1'])
 
     img_units = d_model[0].header['CUNIT1']
 
@@ -255,8 +256,25 @@ def compare_V2_obs_vs_image_reco( oi, oif , return_data = False,  savefig=None, 
     frame1=fig2.add_axes((.1,.3,.8,.6))
     frame2=fig2.add_axes((.1,.05,.8,.2))  
     
+    if return_data:
+        return_dict = {
+                'flags': {},
+                'B/wl_data': {},
+                'V2_data': {},
+                'V2err_data': {},
+                'B/wl_model': {},
+                'V2_model': {},
+                'flag_filt': {},  
+                'chi2': {},  
+                'residuals':{}
+            }
+    
     for i in range(len( oi.data)):
         
+        fname = oi.data[i]['filename'].split('/')[-1]
+        if return_data:
+            for k,_ in return_dict.items():
+                return_dict[k][fname]={}
         #=========== for plotting 
         # filter for the wavelengths we are looking at 
         wvl_filt = (oi.data[i]['WL'] >= wvl_lims[0]) & (oi.data[i]['WL'] <= wvl_lims[1])
@@ -281,7 +299,8 @@ def compare_V2_obs_vs_image_reco( oi, oif , return_data = False,  savefig=None, 
             badflag_filt = (~flags.reshape(-1) ) & (V2_data.reshape(-1)>0) #& ((oif.data[0]['OI_VIS2']['all']['V2']>0).reshape(-1))
 
             flag_filt = badflag_filt & wvl_filt
-        
+            
+
             # V2 
             if (i == 0) & (cnt == 0): # include legend label
                 # data 
@@ -296,10 +315,22 @@ def compare_V2_obs_vs_image_reco( oi, oif , return_data = False,  savefig=None, 
                 # model
                 frame1.plot(B_wl_model[flag_filt],  V2_model[flag_filt],'.', color=model_col)
                 
-                
-            binned_chi2 = (V2_data[flag_filt]-V2_model[flag_filt])**2 / V2err_data[flag_filt]**2
+            residuals = V2_data[flag_filt] - V2_model[flag_filt]
+            binned_chi2 = residuals**2 / V2err_data[flag_filt]**2
             frame2.plot( B_wl_data[flag_filt],  binned_chi2, '.', color='k' )
             
+            if return_data:
+                return_dict['flags'][fname][b] = flags
+                return_dict['flags'][fname][b] = flags
+                return_dict['B/wl_data'][fname][b] = B_wl_data
+                return_dict['V2_data'][fname][b] = V2_data
+                return_dict['V2err_data'][fname][b] = V2err_data
+                return_dict['B/wl_model'][fname][b] = B_wl_model
+                return_dict['V2_model'][fname][b] = V2_model
+                return_dict['flag_filt'][fname][b] = flag_filt
+                return_dict['chi2'][fname][b] = binned_chi2
+                return_dict['residuals'][fname][b] = residuals
+                
     #frame1.text(10,0.2,feature,fontsize=15)
     
     if logV2:
@@ -323,17 +354,7 @@ def compare_V2_obs_vs_image_reco( oi, oif , return_data = False,  savefig=None, 
         plt.savefig( savefig, bbox_inches='tight', dpi=300)
  
     
-    if return_data:
-        return_dict = {
-                'flags': flags,
-                'B_wl_data': B_wl_data,
-                'V2_data': V2_data,
-                'V2err_data': V2err_data,
-                'B_wl_model': B_wl_model,
-                'V2_model': V2_model,
-                'flag_filt': flag_filt  
-            }
-        
+    if return_data:   
         return( return_dict )
 
 def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , **kwargs):  
@@ -351,10 +372,25 @@ def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , 
     frame1=fig3.add_axes((.1,.3,.8,.6))
     frame2=fig3.add_axes((.1,.05,.8,.2))  
     
-    
+        
+    if return_data:
+        return_dict = {
+                'flags': {},
+                'Bmax/wl_data': {},
+                'CP_data': {},
+                'CPerr_data': {},
+                'Bmax/wl_model': {},
+                'CP_model': {},
+                'flag_filt': {},  
+                'chi2': {},  
+                'residuals':{}
+            }
     # data 
     for i in range(len( oi.data)): 
-        
+        fname = oi.data[i]['filename'].split('/')[-1]
+        if return_data:
+            for k,_ in return_dict.items():
+                return_dict[k][fname]={}
         #=========== for plotting 
         # filter for the wavelengths we are looking at 
         wvl_filt = (oi.data[i]['WL'] >= wvl_lims[0]) & (oi.data[i]['WL'] <= wvl_lims[1])
@@ -378,6 +414,8 @@ def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , 
 
             flag_filt = badflag_filt & wvl_filt
             
+
+                
             if (i == 0) & (cnt == 0): # include legend label
                 # data 
                 frame1.errorbar(B_wl_data[flag_filt], T3_data[flag_filt], yerr = T3err_data[flag_filt], color=obs_col, label='obs',alpha=0.9,fmt='.')
@@ -395,14 +433,26 @@ def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , 
             #binned_chi2 = (T3_data[flag_filt]-T3_model[flag_filt])**2 / T3err_data[flag_filt]**2
             # USING CONVENTION OF CHI2 = (1-cos(theta))^2/sigma^2 - BEING CAREFUL WITH UNITS OF RADIANS
             # Interferometric Imaging Directly with Closure Phases and Closure Amplitudes ( Andrew A. Chael, 2018)
-            binned_chi2 = (1-np.cos( np.deg2rad( T3_data[flag_filt] - T3_model[flag_filt] ) ) )**2 / np.deg2rad(T3err_data[flag_filt])**2
+            residuals = 1-np.cos( np.deg2rad( T3_data[flag_filt] - T3_model[flag_filt] ) ) 
+            binned_chi2 = residuals**2 / np.deg2rad(T3err_data[flag_filt])**2
             frame2.plot( B_wl_data[flag_filt],  binned_chi2, '.', color='k' )
     
+            if return_data:
+                return_dict['flags'][fname][b] = flags
+                return_dict['Bmax/wl_data'][fname][b] = B_wl_data
+                return_dict['CP_data'][fname][b] = T3_data
+                return_dict['CPerr_data'][fname][b] = T3err_data
+                return_dict['Bmax/wl_model'][fname][b] = B_wl_model
+                return_dict['CP_model'][fname][b] = T3_model
+                return_dict['flag_filt'][fname][b] = flag_filt
+                return_dict['chi2'][fname][b] = binned_chi2 
+                return_dict['residuals'][fname][b] = residuals
+                
     frame2.axhline(1,color='grey',ls=':')
     
     #frame1.text(10,10,feature,fontsize=15)
     
-    CP_ylim = kwargs.get('CPylim', np.max(1.2 * abs( T3_data ))  )
+    CP_ylim = kwargs.get('CPylim',180  )
     
     #if logV2:
     #    plt.yscale('log')
@@ -421,16 +471,7 @@ def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , 
         plt.savefig( savefig , bbox_inches='tight', dpi=300)
     
     if return_data:
-        return_dict = {
-                'flags': flags,
-                'B_wl_data': B_wl_data,
-                'T3_data': T3_data,
-                'T3err_data': T3err_data,
-                'B_wl_model': B_wl_model,
-                'T3_model': T3_model,
-                'flag_filt': flag_filt  
-            }
-        
+
         return( return_dict )
 
     

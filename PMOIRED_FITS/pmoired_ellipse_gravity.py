@@ -24,13 +24,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os 
 import pickle
+import json
+comp_loc = 'ANU'
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
 
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/home/rtc/Documents/long_secondary_periods/data/'
-save_path_0 = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/ellipse/'
+data_path = path_dict[comp_loc]["data"] #'/home/rtc/Documents/long_secondary_periods/data/'
+save_path_0 = path_dict[comp_loc]["root"] + "PMOIRED_FITS/ellipse/" #'/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/ellipse/'
 #results_path = '/Users/bencb/Documents/long_secondary_periods/parameter_modelling/RESOLVED_BINARY_RESULTS/'
 
-gravity_files = glob.glob(data_path+'gravity/my_reduction_v3/*.fits')
+gravity_files = glob.glob(data_path+'gravity/data/*.fits')
 
 ins='GRAVITY'
 feature='ellipse_per_wvl'
@@ -40,7 +43,7 @@ ud_fits = pd.read_csv(data_path + 'UD_fit.csv',index_col=0)
 
 
 
-oi = pmoired.OI(gravity_files , insname='GRAVITY_SC_P1', binning = 1 ) 
+oi = pmoired.OI(gravity_files , insname='GRAVITY_SC_P1', binning = 100 ) 
 
 
 
@@ -122,7 +125,7 @@ frame4.errorbar(wvls, redchi2  , yerr=uderr, color = 'k', lw = 2)
 frame4.set_ylabel(r'$\chi^2_\nu$',fontsize=fontsize)
 frame4.tick_params(labelsize=fontsize)
 
-plt.savefig(save_path + f'ellipse_per_wvl_pmoired_{ins}.png',dpi=300, bbox_inches='tight')
+#plt.savefig(save_path + f'ellipse_per_wvl_pmoired_{ins}.png',dpi=300, bbox_inches='tight')
 
 
 # looking at best fit images 
