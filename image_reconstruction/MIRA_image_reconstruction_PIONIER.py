@@ -11,6 +11,24 @@ import pandas as pd
 #export PATH="$HOME/easy-yorick/bin/:$PATH"
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+
+##### FUCKING AROUND WITH MIRA
+# ymira -initial=Dirac -pixelsize=0.55mas -fov=35mas -flux=1 -min=0 -use_vis=none -use_vis2=none -overwrite -use_t3=all /home/rtc/Documents/long_secondary_periods/data/merged_files/RT_Pav_PIONIER_MERGED_2022-04-29.fits /home/rtc/Downloads/imageReco_PIONIER_H_v2.fits
+# 
+# -pixelsize=0.55mas -fov=35mas -flux=1 -min=0 -wavemin=1400.0nm -wavemax=1799.9999999999998nm -save_visibilities -overwrite -bootstrap=1 -save_initial -initial=/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/PIONIER_H/priors/UD/best_UD_PRIOR_MATISSE_1.4um.fits -initialhdu=RECO_IMAGE -recenter -use_vis=none -use_vis2=all -use_t3=phi -save_dirty_map -save_dirty_beam -save_residual_map /home/rtc/Documents/long_secondary_periods/data/merged_files/RT_Pav_PIONIER_MERGED_2022-04-29.fits /home/rtc/Downloads/imageReco_PIONIER_H.fits
+# from astropy.io import fits
+# import matplotlib.pyplot as plt
+# #a = fits.open( "/home/rtc/Downloads/imageReco_PIONIER_H_v2.fits")
+# #plt.imshow( a[0].data ); plt.show()
+# path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
+# comp_loc = 'ANU'
+# obs_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits')
+# im_reco_fits =fits.open(image_file)
+# # oi is observed, oif is fake observations generated from image reconstruction 
+# # at UV samples of the observed data
+# oi, oif = plot_util.simulate_obs_from_image_reco( obs_files, image_file )
+
+
 #data_path = '/home/rtc/Documents/long_secondary_periods/data/merged_files/' #matisse N 
 data_path =  '/home/rtc/Documents/long_secondary_periods/data/pionier/data/' # pionier 
 """
@@ -68,6 +86,16 @@ regularisation
 # (regul=hyperbolic) Edge-preserving smoothness (parameters: mu, tau, eta) | 
 # (regul=compactness) Quadratic compactness (parameters: mu, gamma)
 #  
+
+# Calling ymira --regul=help
+# Available regularizations:
+
+#   -regul=hyperbolic -tau=...
+#   Edge-preserving smoothness with hyperbolic norm and threshold TAU,
+#   approximates total variation (TV) with TAU very small.
+
+#   -regul=compactness -gamma=...
+#   Quadratic compactness with full-width at half maximum GAMMA.
 """
 
 
