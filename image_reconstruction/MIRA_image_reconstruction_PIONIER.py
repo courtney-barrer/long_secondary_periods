@@ -28,6 +28,13 @@ import pandas as pd
 # # at UV samples of the observed data
 # oi, oif = plot_util.simulate_obs_from_image_reco( obs_files, image_file )
 
+# docker run --rm -ti --platform linux/amd64 \
+#   -v /Users/bencb/Documents/long_secondary_periods/mira_docker_data/data/merged_files:/home/yorick \
+#   ferreol/mira \
+#   -initial=Dirac -pixelsize=0.55mas -fov=35mas -flux=1 -min=0 -use_vis=none -use_vis2=all -use_t3=all \
+#   /home/yorick/RT_Pav_PIONIER_MERGED_2022-04-29.fits \
+#   /Users/bencb/Downloads/test.fits
+
 
 #data_path = '/home/rtc/Documents/long_secondary_periods/data/merged_files/' #matisse N 
 data_path =  '/home/rtc/Documents/long_secondary_periods/data/pionier/data/' # pionier 

@@ -1,5 +1,6 @@
 *fits
 image_reconstruction/image_reco
+mira_docker_data/
 data
 *.pyc
 *.pyo
