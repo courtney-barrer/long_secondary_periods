@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np  
 from astropy.io import fits
 import pmoired
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
     """ compare observed vs modelled V2 and CP 
@@ -211,20 +212,25 @@ def simulate_obs_from_image_reco( obs_files, image_file ):
         cube['image'] = np.array([ img  for _ in a['WL']] )
         cube['WL'] = a['WL']
         
+        if hasattr(a['MJD'], '__len__'):
+            mjd = np.median( a['MJD'] ) 
+            
         fake_obs_list.append( \
             pmoired.oifake.makeFakeVLTI(\
                 t= a['telescopes'],\
                 target = ( a['header']['RA']* 24 / 360 , a['header']['DEC'] ),\
                 lst = [a['LST']], \
                 wl = a['WL'], \
-                mjd0 = a[ 'MJD'],\
+                mjd0 = [mjd], #a[ 'MJD'],\
                 cube = cube ) 
         )
 
     # makefake does some operation on MJD so still doesn't match.  
     oif.data = fake_obs_list
+
+    # sort data by MJD - issues with Gravity when x['MJD'] is a list... TO DO 
     
-    oi.data = sorted(oi.data, key=lambda x: x['MJD'])
+    oi.data = sorted(oi.data, key=lambda x: x['MJD'][0]) # have to take first one because sometimes a list 
     
     oif.data = sorted(oif.data, key=lambda x: x['MJD'])
     
@@ -478,3 +484,80 @@ def compare_CP_obs_vs_image_reco( oi, oif , return_data = False, savefig=None , 
     
     
     
+def plot_image_reconstruction( file , single_plot = False , verbose=True, savefig=None):
+    
+    h = fits.open( file )
+
+    dirty_beam = h['IMAGE-OI DIRTY BEAM'].data
+
+    dx = h[0].header['CDELT1'] #mas * 3600 * 1e3
+    x = np.linspace( -h[0].data.shape[0]//2 * dx , h[0].data.shape[0]//2 * dx,  h[0].data.shape[0])
+
+    dy = h[0].header['CDELT2'] #mas * 3600 * 1e3
+    y = np.linspace( -h[0].data.shape[1]//2 * dy , h[0].data.shape[1]//2 * dy,  h[0].data.shape[1])
+
+    origin = 'lower'
+    extent = [np.max(x), np.min(x), np.min(y), np.max(y) ]
+
+    single_plot = False 
+    # the flipping of the image was cross check with pmoired generated images to make sure coordinates were consistent
+    #im = plt.imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+
+
+    #plt.pcolormesh(x[::-1], y,  h[0].data /h[0].data.max() , cmap='Reds')#, norm=colors.LogNorm(vmin=1e-2, vmax=1))
+
+    if single_plot:
+        fig = plt.figure( figsize=(8,8) )
+        im = plt.imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+
+        plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+        plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+        plt.gca().tick_params(labelsize=15)
+
+        plt.text( -x[2], y[2], 'RT Pav', color='k',fontsize=15)
+        #plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+        plt.text( -x[2], y[6], r'$\chi^2$={}'.format( round( h['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+
+        divider = make_axes_locatable(plt.gca())
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        cbar = fig.colorbar( im, cax=cax, orientation='vertical')
+        cbar.set_label( 'Normalized flux', rotation=90,fontsize=15)
+        cbar.ax.tick_params(labelsize=15)      
+
+    else: # we plot dirty beam next to it in subplot
+        fig,ax = plt.subplots( 1,2 , figsize=(12,6) )
+        im = ax[0].imshow( np.fliplr(  h[0].data /h[0].data.max() ),  cmap='Reds',  extent=extent, origin=origin )
+        ax[1].imshow( np.fliplr(  dirty_beam/np.max(dirty_beam) ),  cmap='Reds',  extent=extent, origin=origin )
+
+        ax[0].set_ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+        for axx in [ax[0],ax[1]]:
+            axx.set_xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+            axx.tick_params(labelsize=15)
+
+        ax[0].text( x[2], -y[int( 0.1*len(y)) ], 'Image Reco.', color='k',fontsize=15)
+        ax[0].text( x[2], -y[int( 0.2*len(y))], 'RT Pav', color='k',fontsize=15)
+        #ax[0].text( x[2], -y[30], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+        ax[0].text( x[2], -y[int( 0.3*len(y))], r'$\chi^2$={}'.format( round( h['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+        ax[1].text( x[2], -y[int( 0.1*len(y))], 'Dirty beam', color='k',fontsize=15)
+
+        divider = make_axes_locatable(ax[0])
+        cax = divider.append_axes('top', size='5%', pad=0.05)
+        cbar = fig.colorbar( im, cax=cax, orientation='horizontal')
+        cax.xaxis.set_ticks_position('top')
+        #cbar.set_label( 'Normalized flux', rotation=0,fontsize=15)
+        cbar.ax.tick_params(labelsize=15)    
+
+        divider = make_axes_locatable(ax[1])
+        cax = divider.append_axes('top', size='5%', pad=0.05)
+        cbar = fig.colorbar( im, cax=cax, orientation='horizontal')
+        cax.xaxis.set_ticks_position('top')
+        #cbar.set_label( 'Normalized flux', rotation=0,fontsize=15)
+        cbar.ax.tick_params(labelsize=15)     
+
+    if savefig:
+        plt.savefig( savefig, dpi=300, bbox_inches='tight')
+        
+    if verbose:
+        plt.show()
+    else:
+        plt.close()

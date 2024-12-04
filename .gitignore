@@ -6,3 +6,4 @@ data
 *.pyo
 *.pyd
 .venv
+tests/
