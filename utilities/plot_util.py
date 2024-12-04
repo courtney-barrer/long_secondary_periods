@@ -221,7 +221,7 @@ def simulate_obs_from_image_reco( obs_files, image_file ):
                 target = ( a['header']['RA']* 24 / 360 , a['header']['DEC'] ),\
                 lst = [a['LST']], \
                 wl = a['WL'], \
-                mjd0 = [mjd], #a[ 'MJD'],\
+                mjd0 = a[ 'MJD'], #[mjd], #a[ 'MJD'],\
                 cube = cube ) 
         )
 
@@ -232,7 +232,7 @@ def simulate_obs_from_image_reco( obs_files, image_file ):
     
     oi.data = sorted(oi.data, key=lambda x: x['MJD'][0]) # have to take first one because sometimes a list 
     
-    oif.data = sorted(oif.data, key=lambda x: x['MJD'])
+    oif.data = sorted(oif.data, key=lambda x: x['MJD'][0])
     
     ## SILLY BUG IN PMOIRED WHERE BASELINE/TRIANGLE KEYS ARE INCONSISTENT (e.g. 'D0C1' then 'C1D0')
     ## we fix this here by ordering all relevant keys
@@ -314,17 +314,20 @@ def compare_V2_obs_vs_image_reco( oi, oif , return_data = False,  savefig=None, 
             
                 # model
                 frame1.plot(B_wl_model[flag_filt],  V2_model[flag_filt],'.',label='model', color=model_col)
-            else: 
+
+            else:
+                #try: 
                 # data 
                 frame1.errorbar(B_wl_data[flag_filt], V2_data[flag_filt], yerr = V2err_data[flag_filt],color=obs_col,alpha=0.9,fmt='.')
-            
+                #print( f'{i} {oi.data[i]['filename']} {B_wl_data.shape},{flag_filt.shape}, {V2_data.shape } ')
                 # model
+                #print( f'{i} {B_wl_model.shape},{flag_filt.shape}, {V2_model.shape} ')
                 frame1.plot(B_wl_model[flag_filt],  V2_model[flag_filt],'.', color=model_col)
-                
+
             residuals = V2_data[flag_filt] - V2_model[flag_filt]
             binned_chi2 = residuals**2 / V2err_data[flag_filt]**2
             frame2.plot( B_wl_data[flag_filt],  binned_chi2, '.', color='k' )
-            
+
             if return_data:
                 return_dict['flags'][fname][b] = flags
                 return_dict['flags'][fname][b] = flags

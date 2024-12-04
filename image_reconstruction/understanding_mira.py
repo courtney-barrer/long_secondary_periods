@@ -20,7 +20,7 @@ from utilities import plot_util
 # start new terminal
 #export PATH="$HOME/easy-yorick/bin/:$PATH"
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-os.system('export PATH="$HOME/easy-yorick/bin/:$PATH"')
+
 
 plt.ion()
 
