@@ -25,18 +25,13 @@ from utilities import plot_util
 plt.ion()
 
 """
-simple script 
-dirac prior
-small / big FOV
-2 x 2 x 2 grid search over mu, gamma, tau? Or just mu ? 
-what data - T3 all/none, vis2 all/none
-bootstrap - does this impact ? 
-
-document each output and the fits file, 
-
-Also - what happens if we rotate image 
+if pixelscale and/or fov is not specified it defaults to 
+pixelsize = lambda/4B_max (in milliarc sec) for the central wavelength 
+of the given instrument (default instrument is Pionier), 
+and fov = 60 * pixelsize.
 
 """
+experiment_lab = 'dirac_prior_mu_explore'
 
 parser = argparse.ArgumentParser(description="Script to run image reconstruction with customizable parameters.")
     
@@ -44,12 +39,12 @@ parser = argparse.ArgumentParser(description="Script to run image reconstruction
 parser.add_argument("--ins", type=str, default="pionier",
                     help="Instrument name (default: pionier)")
 parser.add_argument("--savefig", type=str, default=None,
-                    help="Base directory to save plots (default: /home/rtc/Documents/long_secondary_periods/tests/)")
+                    help="Base directory to save plots (default: None which goes to f'/home/rtc/Documents/long_secondary_periods/tests/{ins}/{experiment_lab}/')")
 parser.add_argument("--regul", type=str, default="hyperbolic",
                     help="Regularization method (default: hyperbolic)")
 parser.add_argument("--pixelsize", type=float, default=None,
                     help="Pixel size in milliarcseconds (default: None in which case we set it based on the instrument at lambda/4Bmax)")
-parser.add_argument("--fov", type=float, default=35,
+parser.add_argument("--fov", type=float, default=None,
                     help="Field of view in milliarcseconds (default: 35 mas)")
 parser.add_argument("--use_vis2", type=str, default="all",
                     help="Use vis2 data ('all', 'phi', or 'none'; default: all)")
@@ -69,8 +64,7 @@ parser.add_argument("--wavemin", type=float, default=None,
                     help="minimum wavelength in microns")
 parser.add_argument("--wavemax", type=float, default=None,
                     help="maximum wavelength in microns")
-#parser.add_argument("--input_files", type=str, required=True,
-#                    help="Path to the input data files")
+
 
 # Parse arguments and run the script
 args = parser.parse_args()
@@ -97,7 +91,7 @@ wavemax = args.wavemax #um
 
 
 if args.savefig is None:
-    savefig = f'/home/rtc/Documents/long_secondary_periods/tests/{ins}/'
+    savefig = f'/home/rtc/Documents/long_secondary_periods/tests/{ins}/{experiment_lab}/'
     if not os.path.exists(savefig):
         os.makedirs(savefig)
         
@@ -119,6 +113,10 @@ if ins == 'pionier':
     if args.pixelsize is None:
         pixelsize = round(1.6e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2)# lambda/4Bmax in mas
 
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+
     if (wavemin is None) or (wavemax is None):
         wavemin = 1.5
         wavemax = 1.8  
@@ -131,11 +129,15 @@ elif ins == 'gravity':
     if args.pixelsize is None:
         pixelsize = round(2.2e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2)# lambda/4Bmax in mas
  
+    if args.fov is None:
+        fov = 60 * pixelsize
+
     if (wavemin is None) or (wavemax is None):
         wavemin = 2.100#2.05
-        wavemax = 2.101#2.40  
+        wavemax = 2.102#2.40  
                
 elif ins == 'matisse_LM':
+    ## best not use combine L and M and use 'matisse_L' or 'matisse_M' 
     print("Using CHOPPED MATISSE_LM data (not full merged data)")
     input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_LM_chopped_2022-04-08.fits' #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits') #)
     #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits')
@@ -146,24 +148,195 @@ elif ins == 'matisse_LM':
     if args.pixelsize is None:
         pixelsize = round( 3.4e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi, 2) # lambda/4Bmax in mas
    
+    if args.fov is None:
+        fov = 60 * pixelsize
+
     if (wavemin is None) or (wavemax is None):
-        wavemin = 3.1 #2.8
-        wavemax = 3.3 #3.8      
+        wavemin = 3.1 
+        wavemax = 4.9       
              
-elif ins == 'matisse_N':
-    input_files = glob.glob(path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits')
-    #path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits'
+elif ins == 'matisse_L':
+    print("Using CHOPPED MATISSE_LM data (not full merged data)")
+    input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_LM_chopped_2022-04-08.fits' #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits') #)
+    #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits')
+    #
     # to compare model plots with the observed data
-    obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_chopped_L/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 3.4e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi, 2) # lambda/4Bmax in mas
+   
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 3.3 #2.8
+        wavemax = 3.6 #3.8   
+        
+elif ins == 'matisse_M':
+    print("Using CHOPPED MATISSE_LM data (not full merged data)")
+    input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_LM_chopped_2022-04-08.fits' #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits') #)
+    #'matisse/reduced_calibrated_data_1/all_chopped_L/*fits')
+    #
+    # to compare model plots with the observed data
+    obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_chopped_L/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 3.4e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi, 2) # lambda/4Bmax in mas
+   
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 4.6 
+        wavemax = 4.9    
+
+elif ins == 'matisse_N':
+    
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
+    
+    # ORIGINAL (non phase flipped)
+    #input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # to compare model plots with the observed data
+    #obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
     
     if args.pixelsize is None:
         pixelsize = round( 10e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
-    
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
     if (wavemin is None) or (wavemax is None):
         wavemin = 11.0#7.5
         wavemax = 12.0 #13.0
+
+elif ins == 'matisse_N_8um':
     
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
     
+    # ORIGINAL (non phase flipped)
+    #input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # to compare model plots with the observed data
+    #obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 9e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 8.0#7.5
+        wavemax = 9.0 #13.0
+
+elif ins == 'matisse_N_9um':
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
+    
+    # ORIGINAL (non phase flipped)
+    # input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # # to compare model plots with the observed data
+    # obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 9e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 9.0#7.5
+        wavemax = 10.0 #13.0
+    
+elif ins == 'matisse_N_10um':
+    
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
+    
+    # ORIGINAL (non phase flipped)
+    # input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # # to compare model plots with the observed data
+    # obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 10e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 10.0#7.5
+        wavemax = 11.0 #13.0
+
+elif ins == 'matisse_N_11um':
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
+    
+    # ORIGINAL (non phase flipped)
+    # input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # # to compare model plots with the observed data
+    # obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 11e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 11.0 
+        wavemax = 12.0 
+
+elif ins == 'matisse_N_12um':
+    # using flipped phases and CP phases ( )
+    """
+    modified the visibility phase and closure phases - taking negative sign  “wrong sign of the phases, including closiure phase, in the N-band, causing an image or model rotation of 180 degrees.” -   https://www.eso.org/sci/facilities/paranal/instruments/ 
+    in /home/rtc/Documents/long_secondary_periods/data/swap_N_band_CP.py  we take negative sign of visibility phase and closure phases in the individual reduced and merged data 
+    """
+    obs_files = glob.glob(path_dict[comp_loc]['data'] +  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits")
+    input_files = path_dict[comp_loc]['data'] + "merged_files/modifiedCP_RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits"
+    # ORIGINAL (non phase flipped)
+    # input_files = path_dict[comp_loc]['data'] + 'merged_files/RT_Pav_MATISSE_N-band_MERGED_2022-04-24.fits'
+    # #path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits'
+    # # to compare model plots with the observed data
+    # obs_files = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_merged_N/*fits')
+    
+    if args.pixelsize is None:
+        pixelsize = round( 12e-6 / (4 * 120) * 1e3 * 3600 * 180/np.pi , 2) # lambda/4Bmax in mas
+
+    if args.fov is None:
+        fov = 60 * pixelsize
+
+    if (wavemin is None) or (wavemax is None):
+        wavemin = 12.0 
+        wavemax = 13.0 
 
 
 # file ID given the input parameters
