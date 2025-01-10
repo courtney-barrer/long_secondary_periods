@@ -1,5 +1,6 @@
 *fits
 image_reconstruction/image_reco
+image_reconstruction/image_reco_OLD
 mira_docker_data/
 data
 *.pyc
