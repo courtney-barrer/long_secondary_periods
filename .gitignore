@@ -7,3 +7,4 @@ data
 *.pyd
 .venv
 tests/
+delme*
