@@ -729,6 +729,47 @@ cpdict = plot_util.compare_CP_obs_vs_image_reco(oi, oif, return_data=True, savef
 
 plt.close('all')
 
+
+## Need to add own calculation of chi2 based on image reconstruction 
+kwargs = {'v2_err_min':0.01,'cp_err_min':0.1} 
+comp_dict_v2 = plot_util.compare_models( oi, oif ,measure = 'V2', **kwargs)
+comp_dict_cp = plot_util.compare_models( oi, oif ,measure = 'CP', **kwargs)
+
+
+# Calculate reduced chi-square
+
+def flatten(xss):
+    return [x for xs in xss for x in xs]
+
+
+def get_all_values(nested_dict):
+    """
+    Recursively extract all root values from a nested dictionary.
+
+    Parameters:
+        nested_dict (dict): The input dictionary, which may have arbitrary nesting.
+
+    Returns:
+        list: A flattened list of all values in the nested dictionary.
+    """
+    values = []
+    
+    def extract_values(d):
+        for key, value in d.items():
+            if isinstance(value, dict):  # If value is a dictionary, recurse
+                extract_values(value)
+            else:  # Otherwise, add the value to the list
+                values.append(value)
+    
+    extract_values(nested_dict)
+    return values
+
+v2_chi2 = np.mean(flatten(get_all_values(comp_dict_v2['chi2'])))
+cp_chi2 = np.mean(flatten(get_all_values(comp_dict_cp['chi2'])))
+chi2_reduced = (v2_chi2 + cp_chi2) / 2
+
+
+
 ###########################################################################
 # writing the results to a PDF
 
@@ -744,7 +785,8 @@ pdf.cell(0, 10, "RT Pav Image Reconstruction Report", ln=True, align="C")
 
 # Add Paragraph
 pdf.set_font("Arial", size=12)
-pdf.multi_cell(0, 10, input_str)
+pdf.cell(0, 10, f"my calc. reduced chi2 = {chi2_reduced}", ln=True, align="C")
+pdf.multi_cell(0, 20, input_str)
 
 # File names for plots
 plot_files = [

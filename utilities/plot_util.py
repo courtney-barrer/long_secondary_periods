@@ -8,6 +8,10 @@ from matplotlib.colors import LogNorm
 import os
 import glob
 
+from scipy.special import sph_harm
+from scipy.spatial.transform import Rotation as R
+from scipy.interpolate import griddata 
+
 
 def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
     """ compare observed vs modelled V2 and CP 
@@ -838,6 +842,8 @@ def create_parametric_prior(pmoired_model ,fov, pixelsize, save_path=None, label
 
 
 
+
+
 def pmoiredModel_2_fits( oi, imFov = 200 , imPix= 2, name='untitled'):
     """
     save fits files with heade standard required by OImaging so pmoired images can be uploaded as priors
@@ -901,6 +907,47 @@ def pmoiredModel_2_fits( oi, imFov = 200 , imPix= 2, name='untitled'):
     return( h )
 
 
+
+def intensity_2_fits(projected_intensity, dx, dy, name, data_path, header_dict={}, write_file=True):
+
+    if not os.path.exists(data_path):
+        os.makedirs(data_path)
+        print( 'Path created: ', data_path )
+    
+    p = fits.PrimaryHDU( projected_intensity )
+
+    # set headers 
+    p.header.set('CRPIX1', projected_intensity.shape[0] / 2 ) # Reference pixel 
+
+    p.header.set('CRPIX2', projected_intensity.shape[0] / 2 ) # Reference pixel 
+
+    p.header.set('CRVAL1', 0 ) # Coordinate at reference pixel 
+
+    p.header.set('CRVAL2', 0 ) # Coordinate at reference pixel  
+
+    #p.header.set('CDELT1', dx * 1e-3 / 3600 * 180/np.pi ) # Coord. incr. per pixel 
+    p.header.set('CDELT1', dx ) # Coord. incr. per pixel 
+
+    #p.header.set('CDELT2', dy * 1e-3 / 3600 * 180/np.pi ) # Coord. incr. per pixel 
+    p.header.set('CDELT2', dy  ) # Coord. incr. per pixel 
+
+    p.header.set('CUNIT1', 'mas'  ) # Physical units for CDELT1 and CRVAL1 
+
+    p.header.set('CUNIT2', 'mas'  ) # Physical units for CDELT1 and CRVAL1 
+    
+    p.header.set('HDUNAME', name ) # Physical units for CDELT1 and CRVAL1 
+
+    if header_dict:
+        for k, v in header_dict.items():
+            p.header.set(k, v)
+
+    h = fits.HDUList([])
+    h.append( p ) 
+
+    if write_file:
+        h.writeto( data_path + name, overwrite=True )
+
+    return h 
 
 def crop_image_to_extent(image, extent, original_extent):
     """
@@ -1046,6 +1093,113 @@ def plot_reconstructed_images_with_options(
     # Adjust layout
     plt.tight_layout()
     plt.show()
+
+# Thermal modes 
+
+
+
+# Thermal modes 
+def blackbody_intensity(T, wavelength):
+    """
+    Calculate black body intensity using Planck's law.
+    """
+    # Constants
+    h = 6.62607015e-34  # Planck constant (J·s)
+    c = 3.0e8           # Speed of light (m/s)
+    k_B = 1.380649e-23  # Boltzmann constant (J/K)
+
+    return (2 * h * c**2 / wavelength**5) / (np.exp(h * c / (wavelength * k_B * T)) - 1)
+
+def thermal_oscillation(theta, phi, t, T_eff, delta_T_eff, l, m, nu, psi_T):
+    """
+    Calculate the local effective temperature of a star with a thermal oscillation mode.
+    """
+    Y_lm = sph_harm(m, l, phi, theta)
+    Y_lm_normalized = np.real(Y_lm) / np.max(np.real(Y_lm))
+    time_dependent_term = np.cos(2 * np.pi * nu * t + psi_T)
+    return T_eff + delta_T_eff * Y_lm_normalized * time_dependent_term
+
+def rotate_to_observer_frame(theta, phi, theta_obs, phi_obs):
+    """
+    Rotate the stellar coordinates such that the observer's position aligns with the new z-axis.
+    
+    Parameters:
+        theta, phi: Spherical coordinates of the stellar surface.
+        theta_obs, phi_obs: Observer's position in spherical coordinates.
+    
+    Returns:
+        theta_rot, phi_rot: Rotated spherical coordinates.
+    """
+    # Convert observer position to Cartesian coordinates
+    x_obs = np.sin(theta_obs) * np.cos(phi_obs)
+    y_obs = np.sin(theta_obs) * np.sin(phi_obs)
+    z_obs = np.cos(theta_obs)
+
+    # Define rotation: observer's position -> z-axis
+    observer_direction = np.array([x_obs, y_obs, z_obs])
+    z_axis = np.array([0, 0, 1])
+    rotation_axis = np.cross(observer_direction, z_axis)
+    rotation_angle = np.arccos(np.dot(observer_direction, z_axis))
+    if np.linalg.norm(rotation_axis) > 1e-10:
+        rotation_axis /= np.linalg.norm(rotation_axis)
+    else:
+        rotation_axis = np.array([1, 0, 0])  # Arbitrary axis when already aligned
+
+    # Rotation matrix
+    rotation = R.from_rotvec(rotation_angle * rotation_axis)
+
+    # Convert stellar surface to Cartesian coordinates
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    coords = np.stack((x, y, z), axis=-1)
+
+    # Rotate coordinates
+    rotated_coords = rotation.apply(coords.reshape(-1, 3)).reshape(coords.shape)
+
+    # Convert back to spherical coordinates
+    x_rot, y_rot, z_rot = rotated_coords[..., 0], rotated_coords[..., 1], rotated_coords[..., 2]
+    r_rot = np.sqrt(x_rot**2 + y_rot**2 + z_rot**2)
+    theta_rot = np.arccos(np.clip(z_rot / r_rot, -1, 1))
+    phi_rot = np.arctan2(y_rot, x_rot)
+
+    return theta_rot, phi_rot
+
+def project_to_observer_plane(theta_rot, phi_rot, intensity, grid_size=500):
+    """
+    Project the rotated stellar surface onto the observer's 2D image plane.
+    """
+    # Convert spherical to Cartesian
+    x = np.sin(theta_rot) * np.cos(phi_rot)
+    y = np.sin(theta_rot) * np.sin(phi_rot)
+    z = np.cos(theta_rot)
+    
+    # Only keep the visible hemisphere (z > 0)
+    visible = z > 0
+    x_visible = x[visible]
+    y_visible = y[visible]
+    intensity_visible = intensity[visible]
+
+    # Create the observer plane grid
+    x_grid = np.linspace(-1, 1, grid_size)
+    y_grid = np.linspace(-1, 1, grid_size)
+    x_plane, y_plane = np.meshgrid(x_grid, y_grid)
+    
+    # Mask points outside the unit circle
+    r_plane = np.sqrt(x_plane**2 + y_plane**2)
+    mask = r_plane <= 1
+
+    # Interpolate intensity from spherical to plane
+    points = np.vstack((x_visible, y_visible)).T
+    projected_intensity = np.zeros_like(x_plane)
+    projected_intensity[mask] = griddata(
+        points, intensity_visible, (x_plane[mask], y_plane[mask]), method='linear', fill_value=0
+    )
+    
+    return projected_intensity
+
+
+
 
 
 

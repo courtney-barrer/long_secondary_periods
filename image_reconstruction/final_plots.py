@@ -160,17 +160,51 @@ plt.savefig("final_image_reco.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 
+#############################################
+######### PLOTTING INDIVIDUAL RECONSTRUCTIONS AT SHORTER WAVELENGTHS  
+#############################################
 
+# smooth it with dirty beam 
 
+from astropy.io import fits
+from scipy.ndimage import zoom, gaussian_filter
 
+d = fits.open( "image_reconstruction/image_reco/pionier/imageReco_pionier_prior-specificFile_regul-hyperbolic_pixelscale-0.6_fov-10.0_wavemin-1.5_wavemax-1.8_mu-100.0_tau-1.0_eta-1_usev2-all_uset3-phi.fits" )
+#              /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/pionier/imageReco_pionier_prior-specificFile_regul-hyperbolic_pixelscale-0.69_fov-10.0_wavemin-1.5_wavemax-1.8_mu-1000.0_tau-1.0_eta-1_usev2-all_uset3-phi.fits")
+image = d[0].data / np.max(d[0].data)
 
+dirty_beam = d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data)
+levels = [np.max(dirty_beam)/2] # FWHM
 
+# Step 1: Interpolate to higher resolution
+zoom_factor = 2  # Factor to increase resolution
+high_res_image = zoom(image, zoom_factor, order=3)  # Cubic interpolation
 
+# Step 2: Smooth the high-resolution image
+sigma = 1  # Gaussian smoothing parameter
+smoothed_image = gaussian_filter(high_res_image, sigma=sigma)
 
+# Plot the original, interpolated, and smoothed images
+plt.figure(figsize=(15, 5))
 
+plt.subplot(1, 3, 1)
+plt.title("Original Image")
+plt.imshow(image, cmap='gray')
+plt.contour(dirty_beam, colors='white', levels=levels)
+#plt.colorbar()
 
+plt.subplot(1, 3, 2)
+plt.title(f"Interpolated Image ({zoom_factor}x)")
+plt.imshow(high_res_image, cmap='gray')
+plt.colorbar()
 
+plt.subplot(1, 3, 3)
+plt.title("Smoothed Image")
+plt.imshow(smoothed_image, cmap='gray')
+plt.colorbar()
 
+plt.tight_layout()
+plt.show()
 
 
 

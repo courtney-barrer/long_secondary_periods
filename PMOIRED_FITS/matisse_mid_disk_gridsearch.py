@@ -43,14 +43,14 @@ matisse_files_N = glob.glob(data_path+"matisse/reduced_calibrated_data_1/all_mer
 
 wvl_band_dict = {'L':[3.2,3.9],'M':[4.5,5],'N_short':[8,9],'N_mid':[9,10],'N_long':[10,13]}
 
-min_rel_V2_error = 0.01
-min_rel_CP_error = 0.1 #deg
-max_rel_V2_error = 100 
-max_rel_CP_error = 20 #deg
+min_rel_V2_error = 0.05 #0.01
+min_rel_CP_error = 1 #0.1 #deg
+max_rel_V2_error = 0.4 #100 
+max_rel_CP_error = 40 #20 #deg
 
 
 
-feature = 'N_'
+feature = 'N_mid'
 model_type = 'disk'
 
 #if __name__ == '__main__':
@@ -66,8 +66,10 @@ for i, incl in enumerate( incl_grid ) :
         oi.setupFit({'obs':['V2', 'T3PHI'] ,'wl ranges':[wvl_band_dict[feature]]})
         
         best_model = {'p,ud': 10.47,'p,f': 1, 'r,diamin': 20,'r,diamout': 262, \
-                      'r,x': -1.6, 'r,y': 1, 'r,f': 0.9267298700126003,\
+                      'r,x': 0, 'r,y': 0, 'r,f': 0.9267298700126003,\
                           'r,incl': incl,'r,projang': proj}
+        
+
         #{'p,ud': 10.47,'p,f': 1, 'r,diamin': 194,'r,diamout': 262, \
         #              'r,x': -1.6, 'r,y': 1, 'r,f': 0.9267298700126003,\
         #                'r,incl': incl,'r,projang': proj}
@@ -87,18 +89,28 @@ best_proj = proj_grid[ best_indx[1] ]
 
 plt.pcolormesh( proj_grid, incl_grid, chi2_grid ); 
 plt.xlabel('initial projang'); plt.ylabel('initial incl'); plt.colorbar()
+plt.savefig('delme.png')
 
+oi.setupFit({'obs':['V2', 'T3PHI'] ,'wl ranges':[wvl_band_dict[feature]]}) #,constrain=['r,diamin','>','p,ud'])
+        
+# best_incl = 70
+# best_proj = -60 
 best_grid_model = {'p,ud': 10.47,'p,f': 1, 'r,diamin': 20,'r,diamout': 262, \
-                      'r,x': -1.6, 'r,y': 1, 'r,f': 0.9267298700126003,\
+                      'r,x': 0, 'r,y': 0, 'r,f': 0.9267298700126003,\
                           'r,incl': best_incl,'r,projang': best_proj}
+
+#'r,x': -1.6, 'r,y': 1, 
+
+#oi.showModel( best_grid_model ,showSED=False, imFov=300, imPow=0.1 )
+
 # {'p,ud': 10.47,'p,f': 1, 'r,diamin': 194,'r,diamout': 262, \
 #               'r,x': -1.6, 'r,y': 1, 'r,f': 0.9267298700126003,\
 #                   'r,incl': best_incl,'r,projang': best_proj}
 
 # 
-oi.doFit( best_grid_model ,doNotFit=['r,f','p,f'])
-oi.showModel(oi.bestfit['best'], showSED=False, imFov=80, imPow=0.1)
-
+oi.doFit( best_grid_model ,doNotFit=['r,f','p,f'] )
+oi.showModel(oi.bestfit['best'], showSED=False, imFov=300, imPow=0.1)
+plt.savefig('delme.png')
 
 # save the json 
 with open(path_dict[comp_loc]['root'] + 'PMOIRED_FITS/best_models/'+f'bestparamodel_{model_type}_{feature}.json', 'w') as f:
