@@ -42,6 +42,7 @@ import emcee
 import corner
 from matplotlib import colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import json
     
 def scatter_hist(x, y, ax,  ax_histy, color='k'):
     # no labels
@@ -214,13 +215,203 @@ def fit_prep_v2(files, EXTVER=None,flip=True):
     return( v2_df , v2err_df , flag_df,  obs_df)
 
 
-pionier_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
 
 
-gravity_files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+# Example usage (requires DataFrame inputs):
+# plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=df_flags, tick_labelsize=10, label_fontsize=14, title_fontsize=16, grid_on=True)
+def plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=None, show_colorbar=True, **kwargs):
+    """
+    Plot squared visibility with error bars, encoding baseline, wavelength, or B/\lambda in point colors.
 
-matisse_files_L = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
-matisse_files_N = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+    Parameters:
+    df_vis: pd.DataFrame
+        DataFrame of squared visibilities indexed by (Bx, By), columns are wavelengths.
+    df_vis_err: pd.DataFrame
+        DataFrame of squared visibility errors indexed by (Bx, By), columns are wavelengths.
+    x_axis: str
+        Either "baseline", "wavelength", or "B/lambda" to determine the x-axis.
+    df_flags: pd.DataFrame, optional
+        DataFrame of boolean flags with the same shape as df_vis, indicating valid data points.
+    show_colorbar: bool
+        Whether to display the colorbar for the plot.
+    **kwargs: dict
+        Additional keyword arguments for customizing the plot, such as:
+        - tick_labelsize: int, size of tick labels
+        - label_fontsize: int, size of axis labels
+        - title_fontsize: int, size of title
+        - grid_on: bool, whether to show grid
+        - ylim: list, y-axis limits (default: [0, 1])
+        - xlim: list, x-axis limits (default: None, no manual limit applied)
+        - xlabel: str, custom x-axis label
+        - ylabel: str, custom y-axis label
+        - cbar_label: str, custom colorbar label
+        - wavelength_bins: list or int, optional bins to average the observable squared visibility
+
+    Returns:
+    None
+    """
+    if x_axis not in ["baseline", "wavelength", "B/lambda"]:
+        raise ValueError("x_axis must be either 'baseline', 'wavelength', or 'B/lambda'")
+
+    # Compute baseline lengths
+    Bx = np.array([d[0] for d in df_vis.index])
+    By = np.array([d[1] for d in df_vis.index])
+    baselines = np.sqrt(Bx**2 + By**2)
+
+    # Bin wavelengths if specified
+    wavelength_bins = kwargs.get("wavelength_bins")
+    if wavelength_bins is not None:
+        if isinstance(wavelength_bins, int):
+            # Divide into N bins
+            wavelengths = df_vis.columns.astype(float)
+            bins = np.linspace(wavelengths.min(), wavelengths.max(), wavelength_bins + 1)
+        else:
+            # Use specified bins
+            bins = wavelength_bins
+
+        print(f"Generated bins: {bins}")
+        print(f"Wavelength range: {df_vis.columns.min()} to {df_vis.columns.max()}")
+
+        binned_vis = []
+        binned_err = []
+        binned_flags = []
+        binned_wavelengths = []
+        for i in range(len(bins) - 1):
+            mask = (df_vis.columns.astype(float) >= bins[i]) & (df_vis.columns.astype(float) < bins[i + 1])
+            print(f"Bin range: {bins[i]} to {bins[i + 1]}")
+            print(f"Mask: {mask}")
+            print(f"Selected wavelengths: {df_vis.columns[mask]}")
+
+            if mask.any():
+                selected_data = df_vis.loc[:, mask]
+                selected_err = df_vis_err.loc[:, mask]
+                selected_flags = df_flags.loc[:, mask] if df_flags is not None else None
+
+                print(f"Data for bin {i}:{selected_data}")
+                print(f"Mean visibility for bin {i}: {selected_data.mean(axis=1)}")
+
+                binned_vis.append(selected_data.mean(axis=1))
+                binned_err.append(selected_err.mean(axis=1))
+                if selected_flags is not None:
+                    binned_flags.append(selected_flags.any(axis=1))
+                binned_wavelengths.append((bins[i] + bins[i + 1]) / 2)
+
+        df_vis = pd.concat(binned_vis, axis=1)
+        df_vis_err = pd.concat(binned_err, axis=1)
+        df_vis.columns = binned_wavelengths
+        df_vis_err.columns = binned_wavelengths
+
+        if df_flags is not None:
+            df_flags = pd.concat(binned_flags, axis=1)
+            df_flags.columns = binned_wavelengths
+
+        print(f"Binned DataFrame:\n{df_vis}")
+        print(f"Binned Errors:\n{df_vis_err}")
+        if df_flags is not None:
+            print(f"Binned Flags:\n{df_flags}")
+
+    # Prepare colormap for encoding
+    if x_axis == "baseline":
+        color_values = df_vis.columns.astype(float)  # wavelengths
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.coolwarm
+    elif x_axis == "wavelength":
+        color_values = baselines
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.viridis
+    else:  # x_axis == "B/lambda"
+        color_values = df_vis.columns.astype(float)  # wavelengths
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.coolwarm
+
+    # Filter data if flags are provided
+    if df_flags is not None:
+        df_vis = df_vis.where(~df_flags)
+        df_vis_err = df_vis_err.where(~df_flags)
+
+    # Apply error filtering
+    max_err = kwargs.get("max_err", None)
+    min_err = kwargs.get("min_err", None)
+    if max_err is not None:
+        df_vis_err[df_vis_err > max_err] = float(max_err)
+    if min_err is not None:
+        df_vis_err[df_vis_err < min_err] = float(min_err)
+
+    # Plot
+    fig, ax = plt.subplots()
+    for i, wavelength in enumerate(df_vis.columns):
+        if x_axis == "baseline":
+            x_values = baselines
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(wavelength))
+        elif x_axis == "wavelength":
+            x_values = np.full_like(baselines, wavelength, dtype=float)
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(baselines))
+        else:  # x_axis == "B/lambda"
+            x_values = baselines / wavelength
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(wavelength))
+
+        valid_mask = ~np.isnan(y_values)
+        ax.errorbar(x_values[valid_mask], y_values[valid_mask], yerr=y_err[valid_mask], fmt='o', color=color, alpha=0.7)
+
+    # Set labels and title
+    label_fontsize = kwargs.get("label_fontsize", 12)
+    title_fontsize = kwargs.get("title_fontsize", 14)
+
+    xlabel = kwargs.get("xlabel", "Baseline Length (m)" if x_axis == "baseline" else ("Wavelength (m)" if x_axis == "wavelength" else "B/\u03bb (m^{-1})"))
+    ylabel = kwargs.get("ylabel", "Squared Visibility")
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+
+    ax.set_title(kwargs.get("title", "Squared Visibility vs {}".format(
+        "Baseline" if x_axis == "baseline" else ("Wavelength" if x_axis == "wavelength" else "B/\u03bb")
+    )), fontsize=title_fontsize)
+
+    # Customize tick label size
+    tick_labelsize = kwargs.get("tick_labelsize", 10)
+    ax.tick_params(axis='both', which='major', labelsize=tick_labelsize)
+
+    # Set axis limits
+    if kwargs.get("xlim") is not None:
+        ax.set_xlim(kwargs["xlim"])
+    if kwargs.get("ylim") is not None:
+        ax.set_ylim(kwargs["ylim"])
+    else:
+        ax.set_ylim([0, 1])
+
+    # Add colorbar
+    if show_colorbar:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar_label = kwargs.get("cbar_label", "Wavelength (m)" if x_axis == "baseline" else ("Baseline Length (m)" if x_axis == "wavelength" else "Wavelength (m)"))
+        cbar.set_label(cbar_label, fontsize=label_fontsize)
+        cbar.ax.tick_params(labelsize=tick_labelsize)
+
+    # Add grid if specified
+    if kwargs.get("grid_on", True):
+        ax.grid(True)
+
+    plt.show()
+    
+    
+    
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
+comp_loc = 'ANU'
+
+pionier_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+
+
+gravity_files = glob.glob(path_dict[comp_loc]['data'] + 'gravity/data/*.fits')
+#glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+
+matisse_files_L = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_chopped_L/*fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob(path_dict[comp_loc]['data'] + "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits" ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
 #[ h[i].header['EXTNAME'] for i in range(1,8)]
 
 
@@ -236,6 +427,46 @@ mati_N_v2_df , mati_N_v2err_df , mati_N_flag_df, mati_N_obs_df = fit_prep_v2(mat
 #%% V2 summary plot 
 
 
+kwargs = {
+    "tick_labelsize": 8,               # Font size for tick labels
+    "label_fontsize": 12,             # Font size for axis labels
+    "title_fontsize": 14,             # Font size for the plot title
+    "grid_on": True,                  # Display grid
+    "ylim": [0, 1],                   # Y-axis limits
+    "xlabel": "Custom X-axis Label",  # Custom label for the X-axis
+    "ylabel": "Custom Y-axis Label",  # Custom label for the Y-axis
+    "cbar_label": "Custom Colorbar Label",  # Custom label for the colorbar
+    "title": "Custom Title Label",  # Custom label for the colorbar
+    "wavelength_bins": 5,             # Number of bins to average over wavelengths
+    "max_err": 0.2,                   # Maximum error value to display
+    "min_err": None                   # Minimum error value to display
+}
+
+
+def wavelength_filter(df, min_wl, max_wl):
+    filt = df.columns[(df.columns.astype(float) > min_wl) & (df.columns.astype(float) < max_wl)]
+    return filt
+    
+
+#plot_visibility_errorbars(grav_p1_v2_df, grav_p1_v2err_df,grav_p1_flag_df x_axis="baseline", show_colorbar=True)
+plot_visibility_errorbars(grav_p1_v2_df[wfilt], grav_p1_v2err_df[wfilt], x_axis="B/lambda", df_flags=grav_p1_flag_df[wfilt], show_colorbar=True)
+
+wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=3e-6, max_wl=3.5e-6)
+plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
+
+wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=4.0e-6, max_wl=4.6e-6)
+plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
+
+
+# Example usage (requires DataFrame inputs):
+# plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=df_flags, tick_labelsize=10, label_fontsize=14, title_fontsize=16, grid_on=True)
+
+
+
+
+
+
+#%% V2 UV  summary plot 
 v2_df_list = [pion_v2_df.copy() , grav_p1_v2_df.copy(), mati_L_v2_df.copy(), mati_N_v2_df.copy()]
 v2err_df_list = [pion_v2err_df.copy() , grav_p1_v2err_df.copy(), mati_L_v2err_df.copy(), mati_N_v2err_df.copy()]
 flag_df_list =  [pion_flag_df.copy() , grav_p1_flag_df.copy(), mati_L_flag_df.copy(), mati_N_flag_df.copy()]

@@ -701,7 +701,7 @@ output_imreco_file = savefig + f'imageReco_{fid}.fits'
 
 # The only thing that matters for the prior is prior_file_path" to a compatible fits file holding the prior! 
 # send the command to the terminal
-input_str = f"ymira -initial={prior_file_path} -regul={regul} -pixelsize={pixelsize}mas -fov={fov}mas -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm -mu={mu} -tau={tau} -eta={eta} -gtol={gtol} -ftol={ftol} -flux=1 -min=0 -bootstrap=1 -save_initial -save_dirty_map -save_dirty_beam -use_vis=none -use_vis2={use_vis2} -overwrite -use_t3={use_t3} {input_files} {output_imreco_file}"
+input_str = f"ymira -initial={prior_file_path} -regul={regul} -pixelsize={pixelsize}mas -fov={fov}mas -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm -mu={mu} -tau={tau} -eta={eta} -gtol={gtol} -ftol={ftol} -flux=1 -min=0 -bootstrap=1 -save_initial -save_dirty_map -save_dirty_beam -use_vis=none -use_vis2={use_vis2} -overwrite -use_t3={use_t3} -recenter {input_files} {output_imreco_file}"
 #f"ymira -initial=Dirac -regul={regul} -pixelsize={pixelsize}mas -fov={fov}mas -wavemin={wavemin*1e3}nm -wavemax={wavemax*1e3}nm -mu={mu} -tau={tau} -eta={eta} {input_files} {output_imreco_file}"
 #
 os.system(input_str)
@@ -712,6 +712,11 @@ plot_util.plot_image_reconstruction( output_imreco_file, single_plot = False , v
 # compare the observed data to the synthetic image reconstruction data
 oi, oif = plot_util.simulate_obs_from_image_reco( obs_files, output_imreco_file )
 
+
+
+plot_util.plot_smoothed_image_reconstruction( output_imreco_file , zoom_factor = 3, sigma = 2 , include_dirty_beam = True, savefig=savefig + f'smoothed_reco_w_dirt_{fid}.png', verbose=True, plot_logscale=False)
+
+plt.close()
 
 # only use logV for Pionier 
 kwargs =  {
@@ -792,6 +797,7 @@ pdf.multi_cell(0, 20, input_str)
 plot_files = [
     prior_save_path+f"prior_{fid}.png",
     savefig+f"image_reco_w_dirtybeam_{fid}.png",
+    savefig + f'smoothed_reco_w_dirt_{fid}.png',
     savefig+f"v2_obs_vs_imreco_{fid}.png",
     savefig+f"cp_obs_vs_imreco_{fid}.png"
 ]

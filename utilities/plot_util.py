@@ -5,13 +5,15 @@ from astropy.io import fits
 import pmoired
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LogNorm
+import matplotlib.cm as cm
 import os
 import glob
+import pandas as pd
 
 from scipy.special import sph_harm
 from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import griddata 
-
+from scipy.ndimage import zoom, gaussian_filter
 
 def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
     """ compare observed vs modelled V2 and CP 
@@ -662,7 +664,7 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
     of the model  (using coordinate_verification.py) 
     see RT Pav journel entry on 18/12/24 in notion.
     """
-
+    cmap = "Reds" # "cividis" #"Reds"
     h = fits.open( file )
 
     dirty_beam = h['IMAGE-OI DIRTY BEAM'].data
@@ -683,9 +685,9 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
     if single_plot:
         fig = plt.figure( figsize=(8,8) )
         if plot_logscale:
-            im = plt.imshow( ii,  cmap='Reds',  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
+            im = plt.imshow( ii,  cmap=cmap,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
         else:
-            im = plt.imshow( ii,  cmap='Reds',  extent=extent, origin=origin)
+            im = plt.imshow( ii,  cmap=cmap,  extent=extent, origin=origin)
             
         plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
         plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
@@ -712,12 +714,12 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
         
         fig,ax = plt.subplots( 1,2 , figsize=(12,6) )
         if plot_logscale:
-            im = ax[0].imshow( ii,  cmap='Reds',  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
-            ax[1].imshow( ii_dirty ,  cmap='Reds',  extent=extent, origin=origin , norm=LogNorm(vmin=0.01, vmax=1) )
+            im = ax[0].imshow( ii,  cmap=cmap,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
+            ax[1].imshow( ii_dirty ,  cmap=cmap,  extent=extent, origin=origin , norm=LogNorm(vmin=0.01, vmax=1) )
 
         else:
-            im = ax[0].imshow( ii,  cmap='Reds',  extent=extent, origin=origin )
-            ax[1].imshow( ii_dirty ,  cmap='Reds',  extent=extent, origin=origin )
+            im = ax[0].imshow( ii,  cmap=cmap,  extent=extent, origin=origin )
+            ax[1].imshow( ii_dirty ,  cmap=cmap,  extent=extent, origin=origin )
 
         ax[0].set_ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
         for axx in [ax[0],ax[1]]:
@@ -751,6 +753,95 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
         plt.show()
     else:
         plt.close()
+
+
+
+def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_dirty_beam=False, savefig=None, verbose=True, plot_logscale=False):
+    
+    cmap = 'Reds'
+    dirty_beam_contour_offset_factor = 3
+    
+    d = fits.open( file )
+    
+    dx = d[0].header['CDELT1'] #mas * 3600 * 1e3
+    x = np.linspace( -d[0].data.shape[0]//2 * dx , d[0].data.shape[0]//2 * dx,  d[0].data.shape[0])
+
+    dy = d[0].header['CDELT2'] #mas * 3600 * 1e3
+    y = np.linspace( -d[0].data.shape[1]//2 * dy , d[0].data.shape[1]//2 * dy,  d[0].data.shape[1])
+
+    origin = 'lower' #'upper' # default - see  
+
+    extent = [np.max(x), np.min(x), np.min(x), np.max(x) ]
+    
+    image_raw = d[0].data / np.max(d[0].data)
+
+    image = np.fliplr( image_raw ) #image_raw #
+
+    #image =  np.pad(image_raw, d[0].data.shape[0]//4, mode='constant', constant_values=0)
+    
+    dirty_beam = d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data)
+    levels = [1.2*np.max(dirty_beam)/2] # FWHM
+
+    # Interpolate to higher resolution
+    zoom_factor = 3  # Factor to increase resolution
+    high_res_image = zoom(image, zoom_factor, order=3)  # Cubic interpolation
+
+    #  Smooth the high-resolution image
+    sigma = 2  # Gaussian smoothing parameter
+    smoothed_image = gaussian_filter(high_res_image, sigma=sigma)
+    smoothed_image *= 1 / np.max(smoothed_image)
+    
+    #  Offset the contour to the corner
+    if include_dirty_beam:
+        high_res_dirt = zoom(dirty_beam, zoom_factor, order=3)
+        beam_shape = high_res_dirt.shape
+        image_shape = smoothed_image.shape
+        offset_x = image_shape[1]//dirty_beam_contour_offset_factor #np.max(x) // dirty_beam_contour_offset_factor# #  - beam_shape[1]  # Offset to the right
+        offset_y = image_shape[0]//dirty_beam_contour_offset_factor #np.max(x) // dirty_beam_contour_offset_factor # # - beam_shape[0]  # Offset to the bottom
+
+        xx, yy = np.meshgrid(np.arange(beam_shape[1]), np.arange(beam_shape[0]))
+        x_offset, y_offset = xx + offset_x, yy + offset_y
+
+        # Ensure the contour stays within the smoothed image bounds
+        x_offset = np.clip(x_offset, 0, image_shape[1] - 1) #np.clip(x_offset, np.min(x), np.max(x)) #
+        y_offset = np.clip(y_offset, 0, image_shape[0] - 1) #np.clip(y_offset, np.min(y), np.max(x))##
+
+
+    fig = plt.figure()         
+    #plt.title("Smoothed Image")
+    #im = plt.imshow(smoothed_image, cmap='gray')
+    #plt.colorbar(im)
+
+
+    #### dodgy flip check justification .... (know)
+    if plot_logscale:
+        im = plt.imshow( smoothed_image,  cmap=cmap, origin=origin,extent=extent ,aspect='equal') #,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
+    else:
+        im = plt.imshow( smoothed_image,  cmap=cmap, origin=origin,extent=extent ,aspect='equal') #,  extent=extent, origin=origin)
+    # remove extent if you want to see dirty beam correct (bug to fix)
+    #if include_dirty_beam:
+    #    plt.contour(x_offset, y_offset, high_res_dirt, colors='grey', levels=levels, extent=extent) # , label='dirty beam')
+    
+    plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+    plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+    plt.gca().tick_params(labelsize=15)
+
+    wwww = np.mean( [d['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , d['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ] )
+    plt.text( -x[1], y[3], r'RT Pav - {}$\mu$m'.format(round(wwww,2)), color='k',fontsize=15)
+    #plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+    plt.text( -x[1], y[1], r'$\chi^2$={}'.format( round( d['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+
+    divider = make_axes_locatable(plt.gca())
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar = fig.colorbar( im, cax=cax, orientation='vertical')
+    cbar.set_label( 'Normalized flux', rotation=90, fontsize=15)
+    cbar.ax.tick_params(labelsize=15)      
+
+    if savefig is not None:
+        plt.savefig( savefig, dpi=300, bbox_inches='tight')
+
+
+
 
 
 
@@ -1093,6 +1184,281 @@ def plot_reconstructed_images_with_options(
     # Adjust layout
     plt.tight_layout()
     plt.show()
+
+
+
+def fit_prep_v2(files, EXTVER=None,flip=True):    
+    # pionier data is [wvl, B], while gravity is [B,wvl ] (so gravity we want flip =Tue)              
+    
+    if EXTVER==None:
+        wvl_EXTNAME = 'OI_WAVELENGTH'
+        v2_EXTNAME = 'OI_VIS2'
+    
+    else:
+        wvl_EXTNAME = ('OI_WAVELENGTH',EXTVER)
+        v2_EXTNAME = ('OI_VIS2',EXTVER)
+        
+    hdulists = [oifits.open(f) for f in files]
+    
+    print( len( hdulists) ,'\n\n\n')
+    wvls = [ h[wvl_EXTNAME].data['EFF_WAVE'] for h in hdulists]
+    wvl_grid = np.median( wvls , axis=0) # grid to interpolate wvls 
+    
+    data_dict = {} 
+    for ii, h in enumerate( hdulists ):
+        
+        
+        file = files[ii].split('/')[-1]
+        print(f'looking at file {ii}/{len(hdulists)}, which is \n {file} \n')
+        #Bx = h['OI_VIS2'].data['UCOORD'] # east-west 
+        #By = h['OI_VIS2'].data['VCOORD'] # north-south
+                
+        dec = np.deg2rad(h[0].header['DEC'])
+        ha = np.deg2rad( h[0].header['LST']/60/60 )
+        B = [] # to holdprojected baseline !
+        for Bx,By in zip( h['OI_VIS2'].data['UCOORD'],h['OI_VIS2'].data['VCOORD'] ): # U=east-west , V=north-sout
+            #lambda_u, lambda_v, _ = baseline2uv_matrix(ha, dec) @ np.array( [Bx,By,0] ) # lambda_u has to be multiplied by lambda to get u±!!!
+            #B.append( (lambda_u, lambda_v) ) # projected baseline !
+            B.append( (Bx, By) )
+            
+        #B = [(a,b) for a,b in zip(lambda_u, lambda_v) ] # projected baseline ! #(h[v2_EXTNAME].data['UCOORD'], h[v2_EXTNAME].data['VCOORD']) #np.sqrt(h[v2_EXTNAME].data['UCOORD']**2 + h[v2_EXTNAME].data['VCOORD']**2)
+        
+        v2_list = []
+        v2err_list = []
+        flag_list = []
+        dwvl = []
+        obs_time = []
+
+        for b in range(len(B)):
+            
+            #for each baseline make interpolation functions 
+            V2Interp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2DATA'][b,:] ,kind='linear', fill_value =  "extrapolate" )
+            
+            V2errInterp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['VIS2ERR'][b,:] ,kind='linear', fill_value =  "extrapolate" )
+            
+            FlagInterp_fn = interp1d( h[wvl_EXTNAME].data['EFF_WAVE'], h[v2_EXTNAME].data['FLAG'][b,:] ,kind='nearest', fill_value =  "extrapolate" )
+
+            dwvl.append( np.max( [1e9 * ( abs( ww -  wvl_grid ) ) for ww in h[wvl_EXTNAME].data['EFF_WAVE'] ] ) )
+            
+            obs_time.append( [h[0].header['DATE-OBS'],h[0].header['LST']/60/60 ,h[0].header['RA'], h[0].header['DEC'] ] )   #LST,ec,ra should be in deg#
+            
+            v2_list.append(  V2Interp_fn( wvl_grid ) )
+            
+            v2err_list.append( V2errInterp_fn( wvl_grid ) )
+            
+            flag_list.append( FlagInterp_fn( wvl_grid ) )
+          
+        print('max wvl difference in interpolatation for {} = {}nm'.format(file, np.max(dwvl)))
+        
+        # Put these in dataframes 
+        v2_df = pd.DataFrame( v2_list , columns = wvl_grid , index = B )
+        
+        v2err_df = pd.DataFrame( v2err_list , columns = wvl_grid , index = B)
+        
+        time_df = pd.DataFrame( obs_time , columns = ['DATE-OBS','LST', 'RA','DEC'] , index = B)
+        
+        flag_df = pd.DataFrame( np.array(flag_list).astype(bool) , columns = wvl_grid , index = B )
+        
+        data_dict[file] = {'v2':v2_df, 'v2err':v2err_df, 'flags' : flag_df,'obs':time_df}
+        
+        v2_df = pd.concat( [data_dict[f]['v2'] for f in data_dict] , axis=0)
+        
+        v2err_df = pd.concat( [data_dict[f]['v2err'] for f in data_dict] , axis=0)
+        
+        flag_df = pd.concat( [data_dict[f]['flags'] for f in data_dict] , axis=0)
+        
+        obs_df = pd.concat( [data_dict[f]['obs'] for f in data_dict] , axis=0)
+
+           
+    return( v2_df , v2err_df , flag_df,  obs_df)
+
+
+# Example usage (requires DataFrame inputs):
+# plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=df_flags, tick_labelsize=10, label_fontsize=14, title_fontsize=16, grid_on=True)
+def plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=None, show_colorbar=True, **kwargs):
+    """
+    Plot squared visibility with error bars, encoding baseline, wavelength, or B/\lambda in point colors.
+
+    Parameters:
+    df_vis: pd.DataFrame
+        DataFrame of squared visibilities indexed by (Bx, By), columns are wavelengths.
+    df_vis_err: pd.DataFrame
+        DataFrame of squared visibility errors indexed by (Bx, By), columns are wavelengths.
+    x_axis: str
+        Either "baseline", "wavelength", or "B/lambda" to determine the x-axis.
+    df_flags: pd.DataFrame, optional
+        DataFrame of boolean flags with the same shape as df_vis, indicating valid data points.
+    show_colorbar: bool
+        Whether to display the colorbar for the plot.
+    **kwargs: dict
+        Additional keyword arguments for customizing the plot, such as:
+        - tick_labelsize: int, size of tick labels
+        - label_fontsize: int, size of axis labels
+        - title_fontsize: int, size of title
+        - grid_on: bool, whether to show grid
+        - ylim: list, y-axis limits (default: [0, 1])
+        - xlim: list, x-axis limits (default: None, no manual limit applied)
+        - xlabel: str, custom x-axis label
+        - ylabel: str, custom y-axis label
+        - cbar_label: str, custom colorbar label
+        - wavelength_bins: list or int, optional bins to average the observable squared visibility
+
+    Returns:
+    None
+    """
+    if x_axis not in ["baseline", "wavelength", "B/lambda"]:
+        raise ValueError("x_axis must be either 'baseline', 'wavelength', or 'B/lambda'")
+
+    # Compute baseline lengths
+    Bx = np.array([d[0] for d in df_vis.index])
+    By = np.array([d[1] for d in df_vis.index])
+    baselines = np.sqrt(Bx**2 + By**2)
+
+    # Bin wavelengths if specified
+    wavelength_bins = kwargs.get("wavelength_bins")
+    if wavelength_bins is not None:
+        if isinstance(wavelength_bins, int):
+            # Divide into N bins
+            wavelengths = df_vis.columns.astype(float)
+            bins = np.linspace(wavelengths.min(), wavelengths.max(), wavelength_bins + 1)
+        else:
+            # Use specified bins
+            bins = wavelength_bins
+
+        print(f"Generated bins: {bins}")
+        print(f"Wavelength range: {df_vis.columns.min()} to {df_vis.columns.max()}")
+
+        binned_vis = []
+        binned_err = []
+        binned_flags = []
+        binned_wavelengths = []
+        for i in range(len(bins) - 1):
+            mask = (df_vis.columns.astype(float) >= bins[i]) & (df_vis.columns.astype(float) < bins[i + 1])
+            print(f"Bin range: {bins[i]} to {bins[i + 1]}")
+            print(f"Mask: {mask}")
+            print(f"Selected wavelengths: {df_vis.columns[mask]}")
+
+            if mask.any():
+                selected_data = df_vis.loc[:, mask]
+                selected_err = df_vis_err.loc[:, mask]
+                selected_flags = df_flags.loc[:, mask] if df_flags is not None else None
+
+                print(f"Data for bin {i}:{selected_data}")
+                print(f"Mean visibility for bin {i}: {selected_data.mean(axis=1)}")
+
+                binned_vis.append(selected_data.mean(axis=1))
+                binned_err.append(selected_err.mean(axis=1))
+                if selected_flags is not None:
+                    binned_flags.append(selected_flags.any(axis=1))
+                binned_wavelengths.append((bins[i] + bins[i + 1]) / 2)
+
+        df_vis = pd.concat(binned_vis, axis=1)
+        df_vis_err = pd.concat(binned_err, axis=1)
+        df_vis.columns = binned_wavelengths
+        df_vis_err.columns = binned_wavelengths
+
+        if df_flags is not None:
+            df_flags = pd.concat(binned_flags, axis=1)
+            df_flags.columns = binned_wavelengths
+
+        print(f"Binned DataFrame:\n{df_vis}")
+        print(f"Binned Errors:\n{df_vis_err}")
+        if df_flags is not None:
+            print(f"Binned Flags:\n{df_flags}")
+
+    # Prepare colormap for encoding
+    if x_axis == "baseline":
+        color_values = df_vis.columns.astype(float)  # wavelengths
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.coolwarm
+    elif x_axis == "wavelength":
+        color_values = baselines
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.viridis
+    else:  # x_axis == "B/lambda"
+        color_values = df_vis.columns.astype(float)  # wavelengths
+        norm = plt.Normalize(vmin=color_values.min(), vmax=color_values.max())
+        cmap = cm.coolwarm
+
+    # Filter data if flags are provided
+    if df_flags is not None:
+        df_vis = df_vis.where(~df_flags)
+        df_vis_err = df_vis_err.where(~df_flags)
+
+    # Apply error filtering
+    max_err = kwargs.get("max_err", None)
+    min_err = kwargs.get("min_err", None)
+    if max_err is not None:
+        df_vis_err[df_vis_err > max_err] = float(max_err)
+    if min_err is not None:
+        df_vis_err[df_vis_err < min_err] = float(min_err)
+
+    # Plot
+    fig, ax = plt.subplots()
+    for i, wavelength in enumerate(df_vis.columns):
+        if x_axis == "baseline":
+            x_values = baselines
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(wavelength))
+        elif x_axis == "wavelength":
+            x_values = np.full_like(baselines, wavelength, dtype=float)
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(baselines))
+        else:  # x_axis == "B/lambda"
+            x_values = baselines / wavelength
+            y_values = df_vis.iloc[:, i]
+            y_err = df_vis_err.iloc[:, i]
+            color = cmap(norm(wavelength))
+
+        valid_mask = ~np.isnan(y_values)
+        ax.errorbar(x_values[valid_mask], y_values[valid_mask], yerr=y_err[valid_mask], fmt='o', color=color, alpha=0.7)
+
+    # Set labels and title
+    label_fontsize = kwargs.get("label_fontsize", 12)
+    title_fontsize = kwargs.get("title_fontsize", 14)
+
+    xlabel = kwargs.get("xlabel", "Baseline Length (m)" if x_axis == "baseline" else ("Wavelength (m)" if x_axis == "wavelength" else "B/\u03bb (m^{-1})"))
+    ylabel = kwargs.get("ylabel", "Squared Visibility")
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+
+    ax.set_title(kwargs.get("title", "Squared Visibility vs {}".format(
+        "Baseline" if x_axis == "baseline" else ("Wavelength" if x_axis == "wavelength" else "B/\u03bb")
+    )), fontsize=title_fontsize)
+
+    # Customize tick label size
+    tick_labelsize = kwargs.get("tick_labelsize", 10)
+    ax.tick_params(axis='both', which='major', labelsize=tick_labelsize)
+
+    # Set axis limits
+    if kwargs.get("xlim") is not None:
+        ax.set_xlim(kwargs["xlim"])
+    if kwargs.get("ylim") is not None:
+        ax.set_ylim(kwargs["ylim"])
+    else:
+        ax.set_ylim([0, 1])
+
+    # Add colorbar
+    if show_colorbar:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar_label = kwargs.get("cbar_label", "Wavelength (m)" if x_axis == "baseline" else ("Baseline Length (m)" if x_axis == "wavelength" else "Wavelength (m)"))
+        cbar.set_label(cbar_label, fontsize=label_fontsize)
+        cbar.ax.tick_params(labelsize=tick_labelsize)
+
+    # Add grid if specified
+    if kwargs.get("grid_on", True):
+        ax.grid(True)
+
+    plt.show()
+
+
+
+
+
 
 # Thermal modes 
 

@@ -6,6 +6,10 @@ from astropy.io import fits
 import sys
 import os 
 import glob
+
+from astropy.io import fits
+from scipy.ndimage import zoom, gaussian_filter
+
 from matplotlib.colors import LogNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 sys.path.append(os.path.abspath("/home/rtc/Documents/long_secondary_periods"))
@@ -166,23 +170,39 @@ plt.show()
 
 # smooth it with dirty beam 
 
-from astropy.io import fits
-from scipy.ndimage import zoom, gaussian_filter
 
-d = fits.open( "image_reconstruction/image_reco/pionier/imageReco_pionier_prior-specificFile_regul-hyperbolic_pixelscale-0.6_fov-10.0_wavemin-1.5_wavemax-1.8_mu-100.0_tau-1.0_eta-1_usev2-all_uset3-phi.fits" )
-#              /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/pionier/imageReco_pionier_prior-specificFile_regul-hyperbolic_pixelscale-0.69_fov-10.0_wavemin-1.5_wavemax-1.8_mu-1000.0_tau-1.0_eta-1_usev2-all_uset3-phi.fits")
-image = d[0].data / np.max(d[0].data)
-
+f = '/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/pionier/test1/imageReco_pionier_prior-Random_regul-compactness_pixelscale-0.69_fov-10.0_wavemin-1.5_wavemax-1.8_mu-3000.0_tau-1e-05_eta-1_usev2-all_uset3-phi.fits'
+d = fits.open( f )
+# /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/pionier/imageReco_pionier_prior-specificFile_regul-hyperbolic_pixelscale-0.69_fov-10.0_wavemin-1.5_wavemax-1.8_mu-1000.0_tau-1.0_eta-1_usev2-all_uset3-phi.fits")
+image_raw = d[0].data / np.max(d[0].data)
+image =  np.pad(image_raw, d[0].data.shape[0]//4, mode='constant', constant_values=0)
 dirty_beam = d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data)
 levels = [np.max(dirty_beam)/2] # FWHM
 
-# Step 1: Interpolate to higher resolution
-zoom_factor = 2  # Factor to increase resolution
+# Interpolate to higher resolution
+zoom_factor = 3  # Factor to increase resolution
 high_res_image = zoom(image, zoom_factor, order=3)  # Cubic interpolation
 
-# Step 2: Smooth the high-resolution image
-sigma = 1  # Gaussian smoothing parameter
+#  Smooth the high-resolution image
+sigma = 2  # Gaussian smoothing parameter
 smoothed_image = gaussian_filter(high_res_image, sigma=sigma)
+
+
+#  Offset the contour to the corner
+high_res_dirt = zoom(dirty_beam, zoom_factor, order=3)
+beam_shape = high_res_dirt.shape
+image_shape = smoothed_image.shape
+offset_x = image_shape[1]//3 #  - beam_shape[1]  # Offset to the right
+offset_y = image_shape[0]//3 # - beam_shape[0]  # Offset to the bottom
+
+x, y = np.meshgrid(np.arange(beam_shape[1]), np.arange(beam_shape[0]))
+x_offset, y_offset = x + offset_x, y + offset_y
+
+# Ensure the contour stays within the smoothed image bounds
+x_offset = np.clip(x_offset, 0, image_shape[1] - 1)
+y_offset = np.clip(y_offset, 0, image_shape[0] - 1)
+
+
 
 # Plot the original, interpolated, and smoothed images
 plt.figure(figsize=(15, 5))
@@ -190,7 +210,8 @@ plt.figure(figsize=(15, 5))
 plt.subplot(1, 3, 1)
 plt.title("Original Image")
 plt.imshow(image, cmap='gray')
-plt.contour(dirty_beam, colors='white', levels=levels)
+#plt.contour(dirty_beam, colors='white', levels=levels)
+
 #plt.colorbar()
 
 plt.subplot(1, 3, 2)
@@ -201,11 +222,13 @@ plt.colorbar()
 plt.subplot(1, 3, 3)
 plt.title("Smoothed Image")
 plt.imshow(smoothed_image, cmap='gray')
-plt.colorbar()
+plt.contour(x_offset, y_offset, high_res_dirt, colors='white', levels=levels)# , label='dirty beam')
+#plt.colorbar()
 
 plt.tight_layout()
-plt.show()
-
+plt.savefig('delme.png')
+#plt.show()
+plt.close()
 
 
 #############################################
