@@ -2,6 +2,7 @@
 import matplotlib.pyplot as plt
 import numpy as np  
 from astropy.io import fits
+import pyoifits as oifits # used specifically for fit_prep_v2 
 import pmoired
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LogNorm
@@ -12,7 +13,7 @@ import pandas as pd
 
 from scipy.special import sph_harm
 from scipy.spatial.transform import Rotation as R
-from scipy.interpolate import griddata 
+from scipy.interpolate import griddata, interp1d
 from scipy.ndimage import zoom, gaussian_filter
 
 def plotV2CP( oi ,wvl_band_dict, feature, CP_ylim = 180,  logV2 = True, savefig_folder=None,savefig_name='plots') :
@@ -756,7 +757,7 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
 
 
 
-def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_dirty_beam=False, savefig=None, verbose=True, plot_logscale=False):
+def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_dirty_beam=False, savefig=None, verbose=True, annotate=False, plot_logscale=False):
     
     cmap = 'Reds'
     dirty_beam_contour_offset_factor = 3
@@ -827,9 +828,11 @@ def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_d
     plt.gca().tick_params(labelsize=15)
 
     wwww = np.mean( [d['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , d['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ] )
-    plt.text( -x[1], y[3], r'RT Pav - {}$\mu$m'.format(round(wwww,2)), color='k',fontsize=15)
-    #plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
-    plt.text( -x[1], y[1], r'$\chi^2$={}'.format( round( d['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+    
+    if annotate:
+        plt.text( -x[1], y[3], r'RT Pav - {}$\mu$m'.format(round(wwww,2)), color='k',fontsize=15)
+        #plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
+        plt.text( -x[1], y[1], r'$\chi^2$={}'.format( round( d['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
 
     divider = make_axes_locatable(plt.gca())
     cax = divider.append_axes('right', size='5%', pad=0.05)
@@ -1413,8 +1416,8 @@ def plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=No
             color = cmap(norm(wavelength))
 
         valid_mask = ~np.isnan(y_values)
-        ax.errorbar(x_values[valid_mask], y_values[valid_mask], yerr=y_err[valid_mask], fmt='o', color=color, alpha=0.7)
-
+        ax.errorbar(x_values[valid_mask], y_values[valid_mask], yerr=y_err[valid_mask], fmt=kwargs.get("fmt", "none"), color=color, alpha=0.7)
+    
     # Set labels and title
     label_fontsize = kwargs.get("label_fontsize", 12)
     title_fontsize = kwargs.get("title_fontsize", 14)
@@ -1435,10 +1438,16 @@ def plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=No
     # Set axis limits
     if kwargs.get("xlim") is not None:
         ax.set_xlim(kwargs["xlim"])
-    if kwargs.get("ylim") is not None:
-        ax.set_ylim(kwargs["ylim"])
+
+    if kwargs.get("yscale") is "log":
+        ax.set_yscale("log")
+        
     else:
-        ax.set_ylim([0, 1])
+        if kwargs.get("ylim") is not None:
+            ax.set_ylim(kwargs["ylim"])
+        else:
+            ax.set_ylim([0, 1])
+
 
     # Add colorbar
     if show_colorbar:

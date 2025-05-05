@@ -6,6 +6,7 @@ from astropy.io import fits
 import sys
 import os 
 import glob
+import json
 
 from astropy.io import fits
 from scipy.ndimage import zoom, gaussian_filter
@@ -55,21 +56,40 @@ plt.savefig("/home/rtc/Documents/long_secondary_periods/image_reconstruction/ima
 ######### PLOTTING RECONSTRUCTIONS FOR PAPER 
 #############################################
 
-instruments = [
-    "pionier", "gravity", "matisse_L", "matisse_M", "matisse_N_8.0um",
-    "matisse_N_8.5um", "matisse_N_9.0um", "matisse_N_9.5um", "matisse_N_10.0um",
-    "matisse_N_10.5um", "matisse_N_11.0um", "matisse_N_11.5um",
-    "matisse_N_12.0um", "matisse_N_12.5um"
-]
+
+ins = "gravity"
+
+
+fov=80
+#home/rtc/Documents/long_secondary_periods/PMOIRED_FITS/best_models/
+
+IR_ins_list = ['pionier', 'gravity', 'matisse_L', 'matisse_M']
+N_ins_list = ['matisse_N_{w}um' for w in ["8.0","8.5","9.0", "9.5", "10.0", "10.5", "11.0", "11.5", "12.0", "12.5"] ]
+instruments = IR_ins_list + N_ins_list
+
+IR_prior_list = [ bestparamodel_ellipse_gravity.json, bestparamodel_ellipse_gravity.json, bestparamodel_binary_matisse_L.json]
+N_prior_list = [bestparamodel_disk_matisse_N_short_8.5um.json for _ in range(len(N_ins_list)) ]
+prior_list = IR_prior_list + N_prior_list
+mu = [500.0, 500.0] + [3000.0 for _ in range(len( instrument_dict )-2)]
+tau = [1.0 for _ in range(len( instrument_dict ))] # [1e-5, 1e-1 ] + [1.0 for _ in range(len( instrument_dict )-2)]
+#mu = 3000.0
+#tau=1.0
+# instruments = [
+#     "pionier", "gravity", "matisse_L", "matisse_M", "matisse_N_8.0um",
+#     "matisse_N_8.5um", "matisse_N_9.0um", "matisse_N_9.5um", "matisse_N_10.0um",
+#     "matisse_N_10.5um", "matisse_N_11.0um", "matisse_N_11.5um",
+#     "matisse_N_12.0um", "matisse_N_12.5um"
+# ]
 
 wvls = ["1.6","2.2","3.5","4.7","8.0","8.5", "9.0", "9.5", "10.0", "10.5","11.0", "11.5", "12.0", "12.5"]
 
 instrument_dict = {k:v for k,v in zip( wvls, instruments) }
 
-mu = [500.0, 500.0] + [3000.0 for _ in range(len( instrument_dict )-2)]
-tau = [1.0 for _ in range(len( instrument_dict ))]
-#mu = 3000.0
-#tau=1.0
+
+# for doing the actual reconstructions (if we want to do it)
+for i, (wvl,instrument) in enumerate( instrument_dict.items() ):
+cmd = "python image_reconstruction/VLTI-Mira_image_reconstruction_pipeline.py --ins gravity --I_really_want_to_use_this_prior /home/rtc/Documents/long_secondary_periods/PMOIRED_FITS/best_models/bestparamodel_ellipse_gravity.json --fov 10  --mu 100 --tau 1e-5  --savefig /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/F/"
+
 
 base_dir_template = "/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/<ins>"
 file_dict = {}
@@ -111,6 +131,8 @@ for idx, (w, f) in enumerate(file_dict.items()):
     reconstructed_image = np.fliplr(h[0].data / np.max(h[0].data))
 
     if float(w) > 3:
+        reconstructed_image = np.roll( reconstructed_image, shift=-1, axis=0)
+    if float(2) < 5:
         reconstructed_image = np.roll( reconstructed_image, shift=-1, axis=0)
 
     dx = h[0].header['CDELT1']
@@ -230,6 +252,117 @@ plt.savefig('delme.png')
 #plt.show()
 plt.close()
 
+
+
+
+
+
+#############################################
+######### PLOTTING SQUARE VISIBILITIES 
+#############################################
+
+
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
+comp_loc = 'ANU'
+
+pionier_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+
+
+gravity_files = glob.glob(path_dict[comp_loc]['data'] + 'gravity/data/*.fits')
+#glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+
+matisse_files_L = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_chopped_L/*fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob(path_dict[comp_loc]['data'] + "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits" ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#[ h[i].header['EXTNAME'] for i in range(1,8)]
+
+
+pion_v2_df , pion_v2err_df  , pion_flag_df,  pion_obs_df = plot_util.fit_prep_v2(pionier_files)
+
+grav_p1_v2_df , grav_p1_v2err_df, grav_p1_flag_df , grav_p1_obs_df= plot_util.fit_prep_v2(gravity_files, EXTVER = 11 )
+grav_p2_v2_df , grav_p2_v2err_df , grav_p2_flag_df , grav_p2_obs_df = plot_util.fit_prep_v2(gravity_files, EXTVER = 12 )
+
+mati_L_v2_df , mati_L_v2err_df , mati_L_flag_df, mati_L_obs_df = plot_util.fit_prep_v2(matisse_files_L )
+mati_N_v2_df , mati_N_v2err_df , mati_N_flag_df, mati_N_obs_df = plot_util.fit_prep_v2(matisse_files_N )
+
+
+
+kwargs = {
+    "tick_labelsize": 14,               # Font size for tick labels
+    "label_fontsize": 14,             # Font size for axis labels
+    "title_fontsize": 14,             # Font size for the plot title
+    "fmt":".",                   # error bar format
+    "grid_on": False,                  # Display grid
+    "ylim": [0, 1],                   # Y-axis limits
+    "xlabel": r"$B/\lambda$ [rad$^{-1}$]",  # Custom label for the X-axis
+    "ylabel": r"$|V|^2$",  # Custom label for the Y-axis
+    "cbar_label": "wavelength [m]",  # Custom label for the colorbar
+    "title": "",  # Custom label for the colorbar
+    "wavelength_bins": 3,             # Number of bins to average over wavelengths
+    "max_err": 0.2,                   # Maximum error value to display
+    "min_err": None,                   # Minimum error value to display
+    "yscale":"log"
+}
+
+
+def wavelength_filter(df, min_wl, max_wl):
+    filt = df.columns[(df.columns.astype(float) > min_wl) & (df.columns.astype(float) < max_wl)]
+    return filt
+
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_pionier_H.png .    
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_gravity_K.png .
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_matisse_L.png .
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_matisse_M.png .
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_matisse_N_short.png .
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_matisse_N_mid.png .
+# scp -r rtc@150.203.88.114:/home/rtc/Documents/long_secondary_periods/data/V2_matisse_N_long.png .
+### PIONIER (H)
+kwargs["wavelength_bins"] = None
+kwargs["yscale"] = "log"
+wfilt = wavelength_filter(df=pion_v2_df, min_wl=1.4e-6, max_wl=1.8e-6)
+plot_util.plot_visibility_errorbars(pion_v2_df[wfilt], pion_v2err_df[wfilt], x_axis="B/lambda", df_flags=pion_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_pionier_H.png',bbox_inches = "tight")
+
+### GRAVITY (K)
+kwargs["wavelength_bins"] = None
+kwargs["yscale"] = None #"log"
+wfilt = wavelength_filter(df=grav_p1_v2_df, min_wl=2e-6, max_wl=2.4e-6)
+plot_util.plot_visibility_errorbars(grav_p1_v2_df[wfilt], grav_p1_v2err_df[wfilt], x_axis="B/lambda", df_flags=grav_p1_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_gravity_K.png',bbox_inches = "tight")
+
+### MATISSE (L) - wavelength range checked to be consistent with VLTI-Mira_image_reconstruction_pipeline.py
+kwargs["wavelength_bins"] = None
+kwargs["yscale"] = None #"log"
+wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=3.3e-6, max_wl=3.6e-6)
+plot_util.plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_matisse_L.png', bbox_inches = "tight")
+
+### MATISSE (M) - wavelength range checked to be consistent with VLTI-Mira_image_reconstruction_pipeline.py
+kwargs["wavelength_bins"] = 5
+kwargs["yscale"] = None 
+wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=4.6e-6, max_wl=4.9e-6)
+plot_util.plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_matisse_M.png', bbox_inches = "tight")
+
+### MATISSE (N short) 
+kwargs["wavelength_bins"] = 5
+kwargs["yscale"] = None 
+wfilt = wavelength_filter(df=mati_N_v2_df, min_wl=8e-6, max_wl=9e-6)
+plot_util.plot_visibility_errorbars(mati_N_v2_df[wfilt], mati_N_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_N_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_matisse_N_short.png', bbox_inches = "tight")
+
+### MATISSE (N mid) 
+kwargs["wavelength_bins"] = None
+kwargs["yscale"] = None 
+wfilt = wavelength_filter(df=mati_N_v2_df, min_wl=9e-6, max_wl=10e-6)
+plot_util.plot_visibility_errorbars(mati_N_v2_df[wfilt], mati_N_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_N_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_matisse_N_mid.png', bbox_inches = "tight")
+
+### MATISSE (N long) 
+kwargs["wavelength_bins"] = 5
+kwargs["yscale"] = None 
+wfilt = wavelength_filter(df=mati_N_v2_df, min_wl=10e-6, max_wl=12e-6)
+plot_util.plot_visibility_errorbars(mati_N_v2_df[wfilt], mati_N_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_N_flag_df[wfilt], show_colorbar=True,**kwargs)
+plt.savefig('data/V2_matisse_N_long.png', bbox_inches = "tight")
 
 #############################################
 ######### PLOTTING DIRTY BEAMS 

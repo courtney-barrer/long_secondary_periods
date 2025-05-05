@@ -10,3 +10,12 @@ data
 tests/
 delme*
 pipeline_tests/
+
+*.csv
+*.json
+*.png
+*.jpeg
+*.jpg
+*.tiff
+*.tif
+*.mp4
