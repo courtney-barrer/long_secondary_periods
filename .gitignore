@@ -19,3 +19,6 @@ pipeline_tests/
 *.tiff
 *.tif
 *.mp4
+*.txt
+*.ipac
+*.gif
