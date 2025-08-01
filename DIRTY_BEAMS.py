@@ -17,6 +17,7 @@ import glob
 import numpy as np
 import pyoifits as oifits
 import matplotlib.pyplot as plt 
+import json
 
 def dirty_beam(files,du=None,dv=None,verbose=True):
     u,v = [],[]
@@ -84,10 +85,26 @@ def dirty_beam(files,du=None,dv=None,verbose=True):
 
 
 
-#%% MATISSE LM BAND
-files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
 
-north_mas_mat_LM, east_mas_mat_LM, dirty_beam_mat_LM = dirty_beam(files,du=None,dv=None,verbose=True)
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
+comp_loc = 'ANU'
+
+pionier_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+
+
+gravity_files = glob.glob(path_dict[comp_loc]['data'] + 'gravity/data/*.fits')
+#glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/gravity/my_reduction_v3/*.fits')
+
+matisse_files_L = glob.glob(path_dict[comp_loc]['data'] + 'matisse/reduced_calibrated_data_1/all_chopped_L/*fits' ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+matisse_files_N = glob.glob(path_dict[comp_loc]['data'] + "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits" ) #glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#[ h[i].header['EXTNAME'] for i in range(1,8)]
+
+
+
+#%% MATISSE LM BAND
+#files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
+
+north_mas_mat_LM, east_mas_mat_LM, dirty_beam_mat_LM = dirty_beam(matisse_files_L,du=None,dv=None,verbose=True)
 
 
 mask=np.ones(dirty_beam_mat_LM.shape)
@@ -111,9 +128,9 @@ plt.xlabel(r'$\Delta$DEC (mas) - [East]',fontsize=16)
 plt.title('MATISSE LM BAND DIRTY BEAM')
 
 #%% MATISSE N BAND
-files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
+#files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/*.fits')
 
-north_mas_mat_N, east_mas_mat_N, dirty_beam_mat_N = dirty_beam(files,du=1e5,dv=1e5,verbose=True)
+north_mas_mat_N, east_mas_mat_N, dirty_beam_mat_N = dirty_beam(matisse_files_N,du=1e5,dv=1e5,verbose=True)
 
 
 mask=np.ones(dirty_beam_mat_N.shape)
@@ -142,14 +159,14 @@ plt.colorbar()
 plt.xlim([-ll,ll])
 plt.ylim([-ll,ll])
 plt.tight_layout()
-plt.savefig('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/N_band_dirty_beam.png')
+#plt.savefig('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/matisse/reduced_calibrated_data_1/all_merged_N/N_band_dirty_beam.png')
 
 
 
 #%% PIONIER H BAND 
-files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
+#files = glob.glob('/Users/bcourtne/Documents/ANU_PHD2/RT_pav/pionier/*.fits')
 
-north_mas_pio_H, east_mas_pio_H, dirty_beam_pio_H = dirty_beam(files,du=1e5,dv=1e5,verbose=True)
+north_mas_pio_H, east_mas_pio_H, dirty_beam_pio_H = dirty_beam(pionier_files,du=1e5,dv=1e5,verbose=True)
 
 ll=20
 mask=np.ones(dirty_beam_pio_H.shape)

@@ -211,13 +211,13 @@ def intensity_2_fits(projected_intensity, dx, dy, name, data_path, header_dict={
         for k, v in header_dict.items():
             p.header.set(k, v)
 
-    h = fits.HDUList([])
-    h.append( p ) 
+    hh = fits.HDUList([])
+    hh.append( p ) 
 
     if write_file:
-        h.writeto( data_path + name, overwrite=True )
+        hh.writeto( data_path + name, overwrite=True )
 
-    return h 
+    return hh 
 
 
 
@@ -413,6 +413,9 @@ def thermal_dipole_fit(fit_param,  **kwargs):
         float: Reduced chi-square of the fit.
     """
 
+    return_chi2 = kwargs.get('return_chi2', True)  # Return chi-square by default
+    # if not return_chi2: then we return the full comparison dictionaries! 
+    
     fit_ud = kwargs.get('fit_ud', True)
 
     theta = kwargs.get('theta', np.linspace(0, np.pi, 50))
@@ -491,7 +494,7 @@ def thermal_dipole_fit(fit_param,  **kwargs):
     #if save_fits:
     # don't save the file and just pass the fits directly to avoid re-reading it in! 
     name = f'theta-{theta_o:.2f}_phi-{phi_o:.2f}_T-{delta_T:.2f}.fits'
-    h = intensity_2_fits(
+    hh = intensity_2_fits(
         projected_intensity,
         dx=dx,
         dy=dy,
@@ -509,20 +512,25 @@ def thermal_dipole_fit(fit_param,  **kwargs):
     # )
     # dont read the file in an just pass the fits (h) directly!!!! 
     oif = simulate_obs_from_image_reco_FAST(
-        oi, h, img_pixscl = UD_diam / grid_size
+        oi, hh, img_pixscl = UD_diam / grid_size
     )
     # 7. Compare synthetic and observed data
     kwargs = {'v2_err_min':0.001,'cp_err_min':0.1} 
     comp_dict_v2 = plot_util.compare_models(oi, oif, measure='V2' ,**kwargs)
+    plt.show()
     comp_dict_cp = plot_util.compare_models(oi, oif, measure='CP',**kwargs)
-
+    plt.show()
     # 8. Calculate reduced chi-square
     v2_chi2 = np.mean(flatten(get_all_values(comp_dict_v2['chi2'])))
     cp_chi2 = np.mean(flatten(get_all_values(comp_dict_cp['chi2'])))
     chi2_reduced = (v2_chi2 + cp_chi2) / 2
 
-    return chi2_reduced
-
+    if return_chi2:
+        return chi2_reduced
+    else: # return the comparison dictionaries
+        return (comp_dict_v2,comp_dict_cp )
+    
+    
 # Log-probability function
 def log_probability(params, **kwargs):
     """
@@ -627,7 +635,7 @@ path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.jso
 comp_loc = 'ANU'  # computer location
 
 # To include fitting uniform disk diameter 
-fit_ud = True # False 
+#fit_ud = True # False 
 
 if ins == 'pionier':
     obs_files = glob.glob(path_dict[comp_loc]['data'] + 'pionier/data/*.fits')
@@ -663,6 +671,7 @@ enforce_ordered_triangle_keys(oi.data, change_triangle_key_list)
 
 
 default_kwargs = {
+    'return_chi2':True, # Return chi-square by default - this is required for any MCMC sim
     # Observational data
     'oi': oi,  # Preformatted observational data (required)
     
@@ -699,8 +708,51 @@ default_kwargs = {
 
 # testing 
 #theta_o, phi_o, delta_T = 0, 0 , 200 
+# best fit in pionier below:
 theta_o, phi_o, delta_T, UD_diam = np.deg2rad(170),  np.deg2rad(168),  212 , 3.28
-thermal_dipole_fit(fit_param=[theta_o, phi_o, delta_T, UD_diam ],  **default_kwargs)
+default_kwargs['return_chi2'] = False 
+v2c, cp2c = thermal_dipole_fit(fit_param=[theta_o, phi_o, delta_T, UD_diam ],  **default_kwargs)
+
+# to plot it ...
+fs = 15
+plt.figure()
+
+plt.errorbar( x=flatten(get_all_values(v2c['B/wl_data'])) , 
+             y=np.clip( flatten(get_all_values(v2c['V2_data'])), a_min=1e-4, a_max=None),
+             yerr= np.clip( flatten(get_all_values(v2c['V2err_data'])), a_min=0.001, a_max=None),
+             fmt='.', color='grey',alpha =0.5, label='data')
+plt.plot( flatten(get_all_values(v2c['B/wl_data'])) ,
+         flatten(get_all_values(v2c['V2_model'])), 
+         '.',color='blue', alpha=0.5, label='convective dipole model')
+plt.yscale('log')
+plt.legend(fontsize=fs)
+plt.xlabel(r'$B/\lambda$ [rad$^{-1}$]',fontsize=fs)
+plt.ylabel(r'$|V|^2$',fontsize=fs)
+plt.gca().tick_params(labelsize=fs )
+plt.savefig(f'V2_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
+plt.show()
+
+
+plt.figure()
+plt.errorbar( x=flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
+         y=flatten(get_all_values(cp2c['CP_data'])), 
+         yerr= flatten(get_all_values(cp2c['CPerr_data'])),
+          fmt='.', color='grey',alpha =0.5, label='data')
+plt.plot( flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
+         flatten(get_all_values(cp2c['CP_model'])), 
+         '.', color='blue', alpha=0.5, label='convective dipole model')
+plt.legend(fontsize=fs)
+plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]',fontsize=fs)
+plt.ylabel('Closure Phase [rad]',fontsize=fs)
+plt.gca().tick_params(labelsize=fs )
+plt.savefig(f'CP_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
+plt.show()
+
+
+
+# set back to true!! (otherwise MCMC wont work!)
+default_kwargs['return_chi2'] = True 
+
 
 # MCMC parameters
 nwalkers = 32  # Number of walkers
@@ -757,14 +809,14 @@ samples = sampler.get_chain(discard=100, thin=10, flat=True)  # Discard burn-in,
 
 
 
-# file_path = "/Users/bencb/Documents/long_secondary_periods/MCMC_pionier_thermal_dipole_nwalkers_32_fitud-True_nsteps-500.json"
-# with open(file_path, 'r') as json_file:
-#     data = json.load(json_file)
+file_path = "/home/rtc/Documents/long_secondary_periods/MCMC_SMALLER_GRID_pionier_thermal_dipole_nwalkers_32_fitud-True_nsteps-500.json"#"/Users/bencb/Documents/long_secondary_periods/MCMC_pionier_thermal_dipole_nwalkers_32_fitud-True_nsteps-500.json"
+with open(file_path, 'r') as json_file:
+    data = json.load(json_file)
 
 # #In [3]: data.keys()
 # #Out[3]: dict_keys(['$\\theta_o$', '$\\phi_o$', '$\\Delta T$', '$\\theta_{UD}$'])
 
-data = sample_dict
+#data = sample_dict
 
 # Assuming the keys represent parameter names and values are lists of samples
 parameters = list(data.keys())

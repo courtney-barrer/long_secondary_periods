@@ -22,7 +22,7 @@ import pickle
 
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
 data_path = '/home/rtc/Documents/long_secondary_periods/data/'
-save_path_0 = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/binary/'
+save_path_0 = '/home/rtc/Downloads/'
 #results_path = '/Users/bencb/Documents/long_secondary_periods/parameter_modelling/RESOLVED_BINARY_RESULTS/'
 
 matisse_files_L = glob.glob(data_path+'matisse/reduced_calibrated_data_1/all_chopped_L/*.fits')
@@ -43,7 +43,7 @@ logV2 = False # scale log of V^2 in plot
 #[np.mean( [np.nanmedian( x['OI_VIS2'][b]['EV2'] ) for b in x['OI_VIS2']] ) for x in oi.data]
 
 
-wvl_band_dict = {'L':[3.2,3.9],'M':[4.5,5],'N_short':[8,9],'N_mid':[9,10],'N_long':[10,13]}
+wvl_band_dict = {'L':[3.2,3.9]}#,'M':[4.5,5],'N_short':[8,9],'N_mid':[9,10],'N_long':[10,13]}
 
 ins = 'MATISSE'
         
@@ -356,7 +356,7 @@ if __name__ == '__main__':
         frame2.tick_params( labelsize=fsize )
         frame2.axhline(1,color='grey',ls=':')    
         
-        plt.savefig( current_folder + f'{ins}_{feature}_pmoired_BESTFIT_CP_PLOT_{ID}.png', bbox_inches='tight', dpi=300)
+        #plt.savefig( current_folder + f'{ins}_{feature}_pmoired_BESTFIT_CP_PLOT_{ID}.png', bbox_inches='tight', dpi=300)
                
             
         
@@ -402,17 +402,17 @@ if __name__ == '__main__':
         oi.bootstrapFit(300)
         
         oi.showBootstrap()
-        plt.savefig( current_folder + f'{ins}_pmoired_binary_BOOTSTRAPPING_{ID}.png', bbox_inches='tight', dpi=300 )
+        # plt.savefig( current_folder + f'{ins}_pmoired_binary_BOOTSTRAPPING_{ID}.png', bbox_inches='tight', dpi=300 )
         
         
-        with open(current_folder+f'{ins}_pmoired_binary_model_BESTFIT_{ID}.pickle', 'wb') as handle:
-            pickle.dump(oi.bestfit, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open(current_folder+f'{ins}_pmoired_binary_model_BESTFIT_{ID}.pickle', 'wb') as handle:
+        #     pickle.dump(oi.bestfit, handle, protocol=pickle.HIGHEST_PROTOCOL)
             
-        with open(current_folder+f'{ins}_pmoired_binary_model_{ID}.pickle', 'wb') as handle:
-            pickle.dump(oi._model, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open(current_folder+f'{ins}_pmoired_binary_model_{ID}.pickle', 'wb') as handle:
+        #     pickle.dump(oi._model, handle, protocol=pickle.HIGHEST_PROTOCOL)
         
-        with open(current_folder+f'{ins}_pmoired_binary_BOOTSTRAPPED_{ID}.pickle', 'wb') as handle:
-            pickle.dump(oi.boot, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open(current_folder+f'{ins}_pmoired_binary_BOOTSTRAPPED_{ID}.pickle', 'wb') as handle:
+        #     pickle.dump(oi.boot, handle, protocol=pickle.HIGHEST_PROTOCOL)
             
     
         print('---- detection limit')

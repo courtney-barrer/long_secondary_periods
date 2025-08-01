@@ -32,7 +32,7 @@ if __name__=="__main__":
 
     #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
     data_path = path_dict[comp_loc]['data'] #+  "matisse/reduced_calibrated_data_1/all_merged_N_swapped_CP_sign/*fits") #'/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-    save_path = '/Users/bencb/Documents/long_secondary_periods/PMOIRED_FITS/play_plots/'
+    #save_path = '/Users/bencb/Documents/long_secondary_periods/PMOIRED_FITS/play_plots/'
 
     ud_fits = pd.read_csv(path_dict[comp_loc]['data'] + 'UD_fit.csv',index_col=0)
 

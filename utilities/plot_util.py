@@ -757,9 +757,9 @@ def plot_image_reconstruction( file , single_plot = False , verbose=True, plot_l
 
 
 
-def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_dirty_beam=False, savefig=None, verbose=True, annotate=False, plot_logscale=False):
+def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_dirty_beam=False, contours=None, contour_colors=None, cmap = 'Reds' , savefig=None, verbose=True, annotate=False, plot_logscale=False):
     
-    cmap = 'Reds'
+    #cmap = 'plasma' # 'Reds'
     dirty_beam_contour_offset_factor = 3
     
     d = fits.open( file )
@@ -776,22 +776,32 @@ def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_d
     
     image_raw = d[0].data / np.max(d[0].data)
 
-    image = np.fliplr( image_raw ) #image_raw #
+    image =  np.fliplr( image_raw ) #image_raw #
 
     #image =  np.pad(image_raw, d[0].data.shape[0]//4, mode='constant', constant_values=0)
     
-    dirty_beam = d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data)
-    levels = [1.2*np.max(dirty_beam)/2] # FWHM
+    dirty_beam_raw =  d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data) 
+    dirty_beam =  np.fliplr(  dirty_beam_raw) #np.fliplr(  dirty_beam_raw) # dirty_beam_raw
+    #levels = [1.2*np.max(dirty_beam)/2] # FWHM
 
     # Interpolate to higher resolution
     zoom_factor = 3  # Factor to increase resolution
     high_res_image = zoom(image, zoom_factor, order=3)  # Cubic interpolation
 
+    high_res_dirtybeam = zoom(dirty_beam, zoom_factor, order=3) 
+    
     #  Smooth the high-resolution image
     sigma = 2  # Gaussian smoothing parameter
     smoothed_image = gaussian_filter(high_res_image, sigma=sigma)
     smoothed_image *= 1 / np.max(smoothed_image)
-    
+
+    smoothed_dirty_beam = gaussian_filter(high_res_dirtybeam, sigma=sigma)
+    smoothed_dirty_beam *= 1 / np.max(smoothed_image)
+
+
+    if (contours is not None) & (hasattr(contours, '__len__')):
+        #levels = [lv * np.max( smoothed_image ) for lv in contours]
+        levels = sorted([lv * np.max(smoothed_image) for lv in contours])
     #  Offset the contour to the corner
     if include_dirty_beam:
         high_res_dirt = zoom(dirty_beam, zoom_factor, order=3)
@@ -807,7 +817,47 @@ def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_d
         x_offset = np.clip(x_offset, 0, image_shape[1] - 1) #np.clip(x_offset, np.min(x), np.max(x)) #
         y_offset = np.clip(y_offset, 0, image_shape[0] - 1) #np.clip(y_offset, np.min(y), np.max(x))##
 
+    else: # we just plot the dirty beam by itself seperately 
+        
+        #dirty_beam = d['IMAGE-OI DIRTY BEAM'].data / np.max(d['IMAGE-OI DIRTY BEAM'].data)
+        fig = plt.figure()   
+        im = plt.imshow( smoothed_dirty_beam, #dirty_beam,  
+                        cmap=cmap, 
+                        origin=origin,
+                        extent=extent ,
+                        vmax=1,
+                        vmin=0,
+                        aspect='equal') #,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
+        plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
+        plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
+        plt.gca().tick_params(labelsize=15)
+        
+        divider = make_axes_locatable(plt.gca())
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        cbar = fig.colorbar( im, cax=cax, orientation='vertical')
+        cbar.set_label( 'Normalized flux', rotation=90, fontsize=15)
+        cbar.ax.tick_params(labelsize=15)      
 
+
+        if annotate:
+           if "Reds" in cmap:
+               annot_col = 'k'
+           else:
+               annot_col = 'white'
+               
+           plt.text( -10, 0.1, "Dirty Beam", 
+                    color=annot_col ,
+                    fontsize=15,
+                    transform=plt.gca().transAxes,      # Use Axes coordinates (0=left/bottom, 1=right/top)
+                    verticalalignment='bottom',
+                    horizontalalignment='right')
+
+        if savefig is not None:
+            plt.savefig( savefig + "DIRTY_BEAM.jpeg", dpi=300, bbox_inches='tight')
+        plt.close() 
+        
+        
+    # now plot the actual smoothed image reconstruction    
     fig = plt.figure()         
     #plt.title("Smoothed Image")
     #im = plt.imshow(smoothed_image, cmap='gray')
@@ -816,13 +866,29 @@ def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_d
 
     #### dodgy flip check justification .... (know)
     if plot_logscale:
-        im = plt.imshow( smoothed_image,  cmap=cmap, origin=origin,extent=extent ,aspect='equal') #,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
+        im = plt.imshow( smoothed_image,  cmap=cmap, origin=origin,extent=extent ,aspect='equal',norm=LogNorm(vmin=0.01, vmax=1) ) #,  extent=extent, origin=origin, norm=LogNorm(vmin=0.01, vmax=1) )
     else:
         im = plt.imshow( smoothed_image,  cmap=cmap, origin=origin,extent=extent ,aspect='equal') #,  extent=extent, origin=origin)
     # remove extent if you want to see dirty beam correct (bug to fix)
+    ## This is commented out because doesn;t work properly
     #if include_dirty_beam:
     #    plt.contour(x_offset, y_offset, high_res_dirt, colors='grey', levels=levels, extent=extent) # , label='dirty beam')
     
+    if contours is not None:
+        ny, nx = smoothed_image.shape
+        x_vals = np.linspace(extent[0], extent[1], nx)
+        y_vals = np.linspace(extent[2], extent[3], ny)
+        X, Y = np.meshgrid(x_vals, y_vals)
+
+        if contour_colors is None: # set default as white 
+            contour_colors = ['white'] * len(levels)
+            
+        im_contours = plt.contour(X, Y, smoothed_image, levels=levels, colors=contour_colors )
+
+        #im_contours = plt.contour(smoothed_image, levels=levels) #, colors=['red', 'green', 'blue'])
+        # Add labels to contours 
+        plt.clabel(im_contours, fmt='%.2f', inline=True, fontsize=8)
+
     plt.xlabel('$\Delta$ RA <- E [mas]',fontsize=15)
     plt.ylabel('$\Delta$ DEC -> N [mas]',fontsize=15)
     plt.gca().tick_params(labelsize=15)
@@ -830,9 +896,13 @@ def plot_smoothed_image_reconstruction( file , zoom_factor=3, sigma=2, include_d
     wwww = np.mean( [d['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , d['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ] )
     
     if annotate:
-        plt.text( -x[1], y[3], r'RT Pav - {}$\mu$m'.format(round(wwww,2)), color='k',fontsize=15)
+        if "Reds" in cmap:
+            annot_col = 'k'
+        else:
+            annot_col = 'white'
+        plt.text( -x[1], y[0] + 0.2*(y[-1] - y[0]), r'RT Pav - {}$\mu$m'.format(round(wwww,2)), color=annot_col ,fontsize=15)
         #plt.text( -x[2], y[4], r'$\Delta \lambda$ ={:.1f} - {:.1f}$\mu$m'.format( h['IMAGE-OI INPUT PARAM'].header['WAVE_MIN']*1e6  , h['IMAGE-OI INPUT PARAM'].header['WAVE_MAX']*1e6 ) ,fontsize=15, color='k')
-        plt.text( -x[1], y[1], r'$\chi^2$={}'.format( round( d['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color='k',fontsize=15)
+        plt.text( -x[1], y[0] + 0.1*(y[-1] - y[0]), r'$\chi^2$={}'.format( round( d['IMAGE-OI OUTPUT PARAM'].header['CHISQ'] , 2) ), color=annot_col ,fontsize=15)
 
     divider = make_axes_locatable(plt.gca())
     cax = divider.append_axes('right', size='5%', pad=0.05)
@@ -1462,7 +1532,7 @@ def plot_visibility_errorbars(df_vis, df_vis_err, x_axis="B/lambda", df_flags=No
     if kwargs.get("grid_on", True):
         ax.grid(True)
 
-    plt.show()
+    #plt.show()
 
 
 

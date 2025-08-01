@@ -26,7 +26,7 @@ from utilities import plot_util
 
 plt.ion()
 
-gravity_bands = {'continuum':[2.1,2.29], 'HeI':[2.038, 2.078], 'MgII':[2.130, 2.150],'Brg':[2.136, 2.196],\
+gravity_bands = {'continuum':[2.1,2.29], 'H20':[2.000,2.003],'HeI':[2.038, 2.078], 'MgII':[2.130, 2.150],'Brg':[2.136, 2.196],\
                                  'NaI':[2.198, 2.218], 'NIII': [2.237, 2.261], 'CO2-0':[2.2934, 2.298],\
                                    'CO3-1':[2.322,2.324],'CO4-2':[2.3525,2.3555]}
 
@@ -203,6 +203,12 @@ experiment_lab = 'dirac_prior_mu_explore'
 parser = argparse.ArgumentParser(description="Script to run image reconstruction with customizable parameters.")
     
 # Add arguments
+
+parser.add_argument(
+    "--dont_write_report",
+    action="store_true",
+    help="If set, the script will skip writing the report."
+)
 parser.add_argument("--ins", type=str, default="pionier",
                     help="Instrument name (default: pionier)")
 parser.add_argument("--prior", type=str, default="Dirac", 
@@ -707,14 +713,24 @@ input_str = f"ymira -initial={prior_file_path} -regul={regul} -pixelsize={pixels
 os.system(input_str)
 
 # read in the image reconstruction data
-plot_util.plot_image_reconstruction( output_imreco_file, single_plot = False , verbose=True, plot_logscale = args.plot_image_logscale, savefig=savefig + f'image_reco_w_dirtybeam_{fid}.png', prior = prior  )
+plot_util.plot_image_reconstruction( output_imreco_file, single_plot = False , verbose=True, plot_logscale = args.plot_image_logscale, savefig=savefig + f'image_reco_w_dirtybeam_{fid}.jpeg', prior = prior  )
 
 # compare the observed data to the synthetic image reconstruction data
 oi, oif = plot_util.simulate_obs_from_image_reco( obs_files, output_imreco_file )
 
 
 
-plot_util.plot_smoothed_image_reconstruction( output_imreco_file , zoom_factor = 3, sigma = 2 , include_dirty_beam = True, savefig=savefig + f'smoothed_reco_w_dirt_{fid}.png', verbose=True, plot_logscale=False)
+plot_util.plot_smoothed_image_reconstruction( output_imreco_file ,
+                                             zoom_factor = 3, 
+                                             sigma = 2 , 
+                                             include_dirty_beam = False, 
+                                             contours=[0.05,0.9],
+                                             contour_colors=['white','black'] ,
+                                             cmap='plasma',
+                                             annotate=True, #False,#True,
+                                             savefig=savefig + f'smoothed_reco_w_dirt_{fid}.jpeg', 
+                                             verbose=True, 
+                                             plot_logscale=False)
 
 plt.close()
 
@@ -729,8 +745,8 @@ kwargs =  {
     'CPylim':180
     } # 'CP_ylim':180,
 
-v2dict = plot_util.compare_V2_obs_vs_image_reco(oi, oif, return_data=True, savefig=savefig+f'v2_obs_vs_imreco_{fid}.png', **kwargs)
-cpdict = plot_util.compare_CP_obs_vs_image_reco(oi, oif, return_data=True, savefig=savefig+f'cp_obs_vs_imreco_{fid}.png', **kwargs)
+v2dict = plot_util.compare_V2_obs_vs_image_reco(oi, oif, return_data=True, savefig=savefig+f'v2_obs_vs_imreco_{fid}.jpeg', **kwargs)
+cpdict = plot_util.compare_CP_obs_vs_image_reco(oi, oif, return_data=True, savefig=savefig+f'cp_obs_vs_imreco_{fid}.jpeg', **kwargs)
 
 plt.close('all')
 
@@ -778,53 +794,54 @@ chi2_reduced = (v2_chi2 + cp_chi2) / 2
 ###########################################################################
 # writing the results to a PDF
 
-# Initialize PDF 
-pdf = FPDF()
-pdf.set_auto_page_break(auto=True, margin=15)
-pdf.add_page()
-pdf.set_font("Arial", size=12)
+if not args.dont_write_report :
+    # Initialize PDF 
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
 
-# Add Title
-pdf.set_font("Arial", style="B", size=16)
-pdf.cell(0, 10, "RT Pav Image Reconstruction Report", ln=True, align="C")
+    # Add Title
+    pdf.set_font("Arial", style="B", size=16)
+    pdf.cell(0, 10, "RT Pav Image Reconstruction Report", ln=True, align="C")
 
-# Add Paragraph
-pdf.set_font("Arial", size=12)
-pdf.cell(0, 10, f"my calc. reduced chi2 = {chi2_reduced}", ln=True, align="C")
-pdf.multi_cell(0, 20, input_str)
+    # Add Paragraph
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 10, f"my calc. reduced chi2 = {chi2_reduced}", ln=True, align="C")
+    pdf.multi_cell(0, 20, input_str)
 
-# File names for plots
-plot_files = [
-    prior_save_path+f"prior_{fid}.png",
-    savefig+f"image_reco_w_dirtybeam_{fid}.png",
-    savefig + f'smoothed_reco_w_dirt_{fid}.png',
-    savefig+f"v2_obs_vs_imreco_{fid}.png",
-    savefig+f"cp_obs_vs_imreco_{fid}.png"
-]
+    # File names for plots
+    plot_files = [
+        prior_save_path+f"prior_{fid}.jpeg",
+        savefig+f"image_reco_w_dirtybeam_{fid}.jpeg",
+        savefig + f'smoothed_reco_w_dirt_{fid}.jpeg',
+        savefig+f"v2_obs_vs_imreco_{fid}.jpeg",
+        savefig+f"cp_obs_vs_imreco_{fid}.jpeg"
+    ]
 
-# Add Plots
-pdf.set_font("Arial", style="B", size=14)
-pdf.cell(0, 10, "Plots:", ln=True)
+    # Add Plots
+    pdf.set_font("Arial", style="B", size=14)
+    pdf.cell(0, 10, "Plots:", ln=True)
 
-for plot_file in plot_files:
-    try:
-        # Check if file exists
-        with Image.open(plot_file) as img:
-            img_width, img_height = img.size
-            # Scale image to fit page width
-            aspect_ratio = img_height / img_width
-            width = 190  # Max width for A4 page
-            height = width * aspect_ratio
-            pdf.image(plot_file, x=10, y=None, w=width, h=height)
-    except FileNotFoundError:
-        pdf.set_font("Arial", style="B", size=10)
-        pdf.cell(0, 10, f"Plot not found: {plot_file}", ln=True)
+    for plot_file in plot_files:
+        try:
+            # Check if file exists
+            with Image.open(plot_file) as img:
+                img_width, img_height = img.size
+                # Scale image to fit page width
+                aspect_ratio = img_height / img_width
+                width = 190  # Max width for A4 page
+                height = width * aspect_ratio
+                pdf.image(plot_file, x=10, y=None, w=width, h=height)
+        except FileNotFoundError:
+            pdf.set_font("Arial", style="B", size=10)
+            pdf.cell(0, 10, f"Plot not found: {plot_file}", ln=True)
 
 
-# Save PDF
-output_filename = f"report_{fid}.pdf"
-pdf.output(savefig + output_filename)
-print(f"PDF report saved as {output_filename}")
+    # Save PDF
+    output_filename = f"report_{fid}.pdf"
+    pdf.output(savefig + output_filename)
+    print(f"PDF report saved as {output_filename}")
 
 
 

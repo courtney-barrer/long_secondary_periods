@@ -330,32 +330,32 @@ plot_util.plot_visibility_errorbars(grav_p1_v2_df[wfilt], grav_p1_v2err_df[wfilt
 plt.savefig('data/V2_gravity_K.png',bbox_inches = "tight")
 
 ### MATISSE (L) - wavelength range checked to be consistent with VLTI-Mira_image_reconstruction_pipeline.py
-kwargs["wavelength_bins"] = None
+kwargs["wavelength_bins"] = 10 #None
 kwargs["yscale"] = None #"log"
-wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=3.3e-6, max_wl=3.6e-6)
+wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=3.2e-6, max_wl=3.6e-6)
 plot_util.plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
-plt.savefig('data/V2_matisse_L.png', bbox_inches = "tight")
+plt.savefig('data/V2_matisse_L.jpg', bbox_inches = "tight")
 
 ### MATISSE (M) - wavelength range checked to be consistent with VLTI-Mira_image_reconstruction_pipeline.py
-kwargs["wavelength_bins"] = 5
+kwargs["wavelength_bins"] = 10
 kwargs["yscale"] = None 
 wfilt = wavelength_filter(df=mati_L_v2_df, min_wl=4.6e-6, max_wl=4.9e-6)
 plot_util.plot_visibility_errorbars(mati_L_v2_df[wfilt], mati_L_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_L_flag_df[wfilt], show_colorbar=True,**kwargs)
-plt.savefig('data/V2_matisse_M.png', bbox_inches = "tight")
+plt.savefig('data/V2_matisse_M.jpg', bbox_inches = "tight")
 
 ### MATISSE (N short) 
-kwargs["wavelength_bins"] = 5
+kwargs["wavelength_bins"] = 10
 kwargs["yscale"] = None 
 wfilt = wavelength_filter(df=mati_N_v2_df, min_wl=8e-6, max_wl=9e-6)
 plot_util.plot_visibility_errorbars(mati_N_v2_df[wfilt], mati_N_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_N_flag_df[wfilt], show_colorbar=True,**kwargs)
-plt.savefig('data/V2_matisse_N_short.png', bbox_inches = "tight")
+plt.savefig('data/V2_matisse_N_short.jpg', bbox_inches = "tight")
 
 ### MATISSE (N mid) 
 kwargs["wavelength_bins"] = None
 kwargs["yscale"] = None 
 wfilt = wavelength_filter(df=mati_N_v2_df, min_wl=9e-6, max_wl=10e-6)
 plot_util.plot_visibility_errorbars(mati_N_v2_df[wfilt], mati_N_v2err_df[wfilt], x_axis="B/lambda", df_flags=mati_N_flag_df[wfilt], show_colorbar=True,**kwargs)
-plt.savefig('data/V2_matisse_N_mid.png', bbox_inches = "tight")
+plt.savefig('data/V2_matisse_N_mid.jpg', bbox_inches = "tight")
 
 ### MATISSE (N long) 
 kwargs["wavelength_bins"] = 5

@@ -73,7 +73,7 @@ tau_values=(1e-5 1e-3 1 10)
 
 # Base command
 base_command="python image_reconstruction/VLTI-Mira_image_reconstruction_pipeline.py --ins gravity --I_really_want_to_use_this_prior /home/rtc/Documents/long_secondary_periods/PMOIRED_FITS/best_models/bestparamodel_ellipse_gravity.json --fov 10  --mu 100 --tau 1e-5  --savefig /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/gravity/test/"
-
+python image_reconstruction/VLTI-Mira_image_reconstruction_pipeline.py --ins gravity --fov 20  --mu 100 --tau 1e-5  --savefig /home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/gravity/test/
 # Save directory
 save_dir_base="/home/rtc/Documents/long_secondary_periods/image_reconstruction/image_reco/gravity/test2"
 

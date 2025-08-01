@@ -18,11 +18,17 @@ import glob
 import matplotlib.pyplot as plt 
 import pandas as pd
 import os 
+import json
 import pickle
 
+
+path_dict = json.load(open('/home/rtc/Documents/long_secondary_periods/paths.json'))
+comp_loc = 'ANU'
+
+
 #data_path = '/Users/bencb/Documents/long_secondary_periods/rt_pav_data/'
-data_path = '/home/rtc/Documents/long_secondary_periods/data/'
-save_path_0 = '/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/binary/'
+data_path = path_dict[comp_loc]['data'] #'/home/rtc/Documents/long_secondary_periods/data/'
+save_path_0 = '~/Downloads/'#'/Users/bcourtne/Documents/ANU_PHD2/RT_pav/PMOIRED_FITS/binary/'
 #results_path = '/Users/bencb/Documents/long_secondary_periods/parameter_modelling/RESOLVED_BINARY_RESULTS/'
 
 gravity_files = glob.glob(data_path+'gravity/my_reduction_v3/*.fits')
