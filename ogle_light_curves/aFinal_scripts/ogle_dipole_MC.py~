@@ -1,0 +1,814 @@
+"""
+MC simulation of thermal dipole mode for OGLE LMC
+Sequence D stars (including D1/2) stars.
+Simulation uses measured/calculated effective temperatures
+from the measured ogle catalogue as input and then simulates 
+randomly oriented dipoles with random (0-1000K) temperature amplitudes
+
+
+outputs results to a json file with the 
+simulated stellar properties and classification
+along with some of the measured results (e.g. W_jk index, temperature etc)
+
+The goal is to study if the D1/2 sequence can be reproduced simply by 
+geometrical effects of the oscillatory convective dipole mode
+"""
+
+
+# orientation 6 random numbers 
+import json
+from itertools import product
+import numpy as np
+import corner
+import matplotlib.pyplot as plt 
+from scipy.special import sph_harm
+from scipy.spatial.transform import Rotation as R
+from scipy.interpolate import griddata 
+from scipy.signal import welch
+from scipy.signal import find_peaks
+from scipy.interpolate import interp1d
+from astropy.timeseries import LombScargle
+import json
+from matplotlib.animation import FuncAnimation
+import pandas as pd 
+import matplotlib.patches as mpatches
+import os
+from scipy.stats import linregress
+
+from scipy.spatial import cKDTree
+from astropy.table import Table
+
+
+def filter_points_within_distance(x, y, a, b, distance_modulus):
+    """
+    Filters x, y data points based on their distance from the line y = ax + b,
+    within a specified distance modulus.
+
+    Parameters:
+    - x (array-like): Array of x values.
+    - y (array-like): Array of y values.
+    - a (float): Slope of the line.
+    - b (float): Intercept of the line.
+    - distance_modulus (float): Maximum allowable distance from the line.
+
+    Returns:
+    - x_filtered (numpy array): Filtered x values.
+    - y_filtered (numpy array): Filtered y values.
+    - distances (numpy array): Distances of the filtered points from the line.
+    """
+    x = np.array(x)
+    y = np.array(y)
+
+    # Calculate the perpendicular distance from each point to the line y = ax + b
+    distances = np.abs(a * x - y + b) / np.sqrt(a**2 + 1)
+
+    # Filter points within the specified distance modulus
+    mask = distances <= distance_modulus
+    x_filtered = x[mask]
+    y_filtered = y[mask]
+    filtered_distances = distances[mask]
+
+    return x_filtered, y_filtered, filtered_distances, mask
+
+
+
+
+def blackbody_intensity(T, wavelength):
+    return (2 * h * c**2 / wavelength**5) / (np.exp(h * c / (wavelength * k_B * T)) - 1)
+
+def thermal_oscillation(theta, phi, t, T_eff, delta_T_eff, l, m, nu, psi_T):
+    """
+    Calculate the local effective temperature of a star with a thermal oscillation mode.
+    """
+    Y_lm = sph_harm(m, l, phi, theta)
+    Y_lm_normalized = np.real(Y_lm) / np.max(np.real(Y_lm))
+    time_dependent_term = np.cos(2 * np.pi * nu * t + psi_T)
+    return T_eff + delta_T_eff * Y_lm_normalized * time_dependent_term
+
+def rotate_to_observer_frame(theta, phi, theta_obs, phi_obs):
+    """
+    Rotate the stellar coordinates such that the observer's position aligns with the new z-axis.
+    
+    Parameters:
+        theta, phi: Spherical coordinates of the stellar surface.
+        theta_obs, phi_obs: Observer's position in spherical coordinates.
+    
+    Returns:
+        theta_rot, phi_rot: Rotated spherical coordinates.
+    """
+    # Convert observer position to Cartesian coordinates
+    x_obs = np.sin(theta_obs) * np.cos(phi_obs)
+    y_obs = np.sin(theta_obs) * np.sin(phi_obs)
+    z_obs = np.cos(theta_obs)
+
+    # Define rotation: observer's position -> z-axis
+    observer_direction = np.array([x_obs, y_obs, z_obs])
+    z_axis = np.array([0, 0, 1])
+    rotation_axis = np.cross(observer_direction, z_axis)
+    rotation_angle = np.arccos(np.dot(observer_direction, z_axis))
+    if np.linalg.norm(rotation_axis) > 1e-10:
+        rotation_axis /= np.linalg.norm(rotation_axis)
+    else:
+        rotation_axis = np.array([1, 0, 0])  # Arbitrary axis when already aligned
+
+    # Rotation matrix
+    rotation = R.from_rotvec(rotation_angle * rotation_axis)
+
+    # Convert stellar surface to Cartesian coordinates
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    coords = np.stack((x, y, z), axis=-1)
+
+    # Rotate coordinates
+    rotated_coords = rotation.apply(coords.reshape(-1, 3)).reshape(coords.shape)
+
+    # Convert back to spherical coordinates
+    x_rot, y_rot, z_rot = rotated_coords[..., 0], rotated_coords[..., 1], rotated_coords[..., 2]
+    r_rot = np.sqrt(x_rot**2 + y_rot**2 + z_rot**2)
+    theta_rot = np.arccos(np.clip(z_rot / r_rot, -1, 1))
+    phi_rot = np.arctan2(y_rot, x_rot)
+
+    return theta_rot, phi_rot
+
+def project_to_observer_plane(theta_rot, phi_rot, intensity, grid_size=500):
+    """
+    Project the rotated stellar surface onto the observer's 2D image plane.
+    """
+    # Convert spherical to Cartesian
+    x = np.sin(theta_rot) * np.cos(phi_rot)
+    y = np.sin(theta_rot) * np.sin(phi_rot)
+    z = np.cos(theta_rot)
+    
+    # Only keep the visible hemisphere (z > 0)
+    visible = z > 0
+    x_visible = x[visible]
+    y_visible = y[visible]
+    intensity_visible = intensity[visible]
+
+    # Create the observer plane grid
+    x_grid = np.linspace(-1, 1, grid_size)
+    y_grid = np.linspace(-1, 1, grid_size)
+    x_plane, y_plane = np.meshgrid(x_grid, y_grid)
+    
+    # Mask points outside the unit circle
+    r_plane = np.sqrt(x_plane**2 + y_plane**2)
+    mask = r_plane <= 1
+
+    # Interpolate intensity from spherical to plane
+    points = np.vstack((x_visible, y_visible)).T
+    projected_intensity = np.zeros_like(x_plane)
+    projected_intensity[mask] = griddata(
+        points, intensity_visible, (x_plane[mask], y_plane[mask]), method='linear', fill_value=0
+    )
+    
+    return projected_intensity
+
+def wienslaw(T):
+    # T in Kelvin
+    lambda_peak = 2898 / T * 1e-6 # m
+    return lambda_peak
+
+
+
+def get_nearest_limb_darkening_coefficient(hdul, teff, logg, feh, filt, verbose=False):
+    
+    """
+    Retrieve the nearest limb darkening coefficients from a preloaded FITS HDU object.
+
+    Parameters
+    ----------
+    hdul : astropy.io.fits.HDUList
+        FITS object already opened (typically via astropy.io.fits.open).
+        Expected to contain a binary table with limb darkening parameters.
+
+        obtain from : https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=J/A+A/529/A75 
+        referenece:  Claret (2011) "Gravity and limb-darkening coefficients for the Kepler, CoRoT, Spitzer, uvby, UBVRIJHK, and Sloan photometric systems"
+
+    teff : float
+        Effective temperature [K] of the target star.
+
+    logg : float
+        Logarithm (base 10) of the surface gravity [cgs].
+
+    feh : float
+        Metallicity [Fe/H] of the target star.
+
+    filt : str
+        Photometric filter name (e.g., 'V', 'K', 'H') to match entries in the FITS table.
+
+    verbose : bool, optional
+        If True, prints diagnostic output including filter/method/model matches and
+        the selected coefficient row. Default is True.
+
+    Returns
+    -------
+    result : dict
+        Dictionary containing the matched limb darkening coefficients and corresponding
+        stellar parameters from the table (Teff, logg, Z, Filt, Method, Model, Coefficients).
+
+    Raises
+    ------
+    ValueError
+        If no matching entries are found for the given filter.
+
+    Notes
+    -----
+    The method and model fields are not currently filtered due to encoding issues.
+    Nearest-neighbor matching is performed on (Teff, logg, [Fe/H]) using Euclidean distance.
+    """
+        # get fits data from 
+    # 
+    
+    data = hdul[1].data
+
+    # Decode 'Filt' column with fallback
+    try:
+        filt_col = np.char.decode(data['Filt'], encoding='latin-1').astype(str)
+    except Exception:
+        filt_col = data['Filt'].astype(str)
+
+    filt_col = np.char.strip(filt_col)
+
+    # Filter only on Filt
+    mask = (filt_col == filt)
+    subset = data[mask]
+
+    if len(subset) == 0:
+        raise ValueError(f"No matching entries found for filter={filt}.")
+
+    # Nearest-neighbor in Teff, logg, Z
+    points = np.column_stack((subset['Teff'], subset['logg'], subset['Z']))
+    target = np.array([teff, logg, feh])
+    tree = cKDTree(points)
+    _, idx = tree.query(target)
+
+    selected = subset[idx]
+
+    if verbose:
+        print("Matched coefficients (with column names):")
+        for name in subset.columns.names:
+            print(f"  {name}: {selected[name]}")
+
+    return selected
+
+
+def limb_darkening(theta_rot, intensity, model="linear", **kwargs):
+    """
+    Apply limb darkening to the stellar surface intensity.
+    
+    Parameters:
+        theta_rot: Array of colatitudes in the observer's frame (radians).
+        intensity: Array of intensities before limb darkening.
+        model: Limb-darkening model to use. Options: "linear", "quadratic", "powerlaw".
+        kwargs: Additional parameters for the specific model:
+            - Linear: u (coefficient).
+            - Quadratic: u1, u2 (coefficients).
+            - Power-law: u (coefficient).
+        
+    Returns:
+        intensity_ld: Intensity with limb darkening applied.
+    """
+    # Calculate mu = cos(theta) for the observer's frame
+    mu = np.cos(theta_rot)
+    
+    # Ensure mu is non-negative (visible hemisphere)
+    mu = np.maximum(mu, 0)
+    
+    if model == "linear":
+        # Linear limb darkening: I(mu) = I_0 * (1 - u + u * mu)
+        u = kwargs.get("u", 0.5)  # Default u = 0.5
+        limb_darkening_factor = (1 - u + u * mu)
+    
+    elif model == "quadratic":
+        # Quadratic limb darkening: I(mu) = I_0 * (1 - u1 * (1 - mu) - u2 * (1 - mu)^2)
+        u1 = kwargs.get("u1", 0.5)  # Default u1 = 0.5
+        u2 = kwargs.get("u2", 0.5)  # Default u2 = 0.5
+        limb_darkening_factor = 1 - u1 * (1 - mu) - u2 * (1 - mu)**2
+    
+    elif model == "powerlaw":
+        # Power-law limb darkening: I(mu) = I_0 * mu^u
+        u = kwargs.get("u", 0.5)  # Default power-law exponent u = 0.5
+        limb_darkening_factor = mu**u
+    
+    else:
+        raise ValueError(f"Unknown limb-darkening model: {model}")
+    
+    # Apply the limb-darkening factor to the intensity
+    intensity_ld = intensity * limb_darkening_factor
+    
+    # Ensure no negative intensity due to limb darkening
+    intensity_ld = np.maximum(intensity_ld, 0)
+    
+    return intensity_ld
+
+
+
+
+
+def random_inclination():
+    z = np.random.uniform(-1, 1)
+    phi = np.random.uniform(0, 2 * np.pi)
+    theta = np.arccos(z)
+    return theta, phi
+
+
+
+def vis_teff_updated(V, I, Fe_H=-1.0):
+    """
+    Estimate effective temperature using V-I color and metallicity calibration
+    based on Casagrande et al. (2010). 
+
+    Parameters:
+        V (float): Mean V magnitude.
+        I (float): Mean I magnitude.
+        Fe_H (float): Metallicity [Fe/H] (default: -1.0 for typical LMC stars).
+
+    Returns:
+        float: Estimated effective temperature (K).
+    """
+
+    # Coefficients from Ramırez et al. (2005) table 3 for V-I
+    # THE EFFECTIVE TEMPERATURE SCALE OF FGK STARS. II. Teff : COLOR : [Fe/H] CALIBRATIONS
+    a0, a1, a2, a3, a4, a5 = 0.3575, 0.9069, -0.2025, 0.0395, -0.0551, -0.0061
+    # Coefficients from Casagrande et al. (2010) table 4 for V-I
+    #a0, a1, a2, a3, a4, a5 = 0.4033, 0.8171, -0.1987, -0.0409, 0.0319, 0.0012
+    
+    R_i = 1.85 # i band extinction
+    R_v = 3.41 # v band extinction in LMC 
+    A_v = 0.3 # total extinction, varies between 0.1-0.3 (source?)
+    
+    # original (used for sim_dict_1-5, but likely wrong)
+    #I_cor = V - A_v 
+    #V_cor = I - R_i/R_v * A_v 
+
+    # corrected (post sim_dict_1-5)
+    V_cor = V - A_v                           # V-band extinction correction
+    I_cor = I - (R_i / R_v) * A_v             # I-band extinction correction
+
+    VI = V_cor - I_cor #V - R_i/R_v * I
+    theta_eff = (
+        a0
+        + a1 * VI
+        + a2 * VI**2
+        + a3 * VI * Fe_H
+        + a4 * Fe_H
+        + a5 * Fe_H**2
+    )
+    return 5040 / theta_eff # = T_eff 
+
+
+
+def teff_giants_KV(V, Ks, Fe_H=-1.0, method = "Hernandez"):
+    """
+    Estimate effective temperature using Ks-V color and metallicity calibration
+    based on either methods 
+        Hernández et al. (2009) table 2 or 5 for V-Ks giants
+        Ramirez et al. (2005) table 3 for V-Ks
+
+    Parameters:
+        V (float): V magnitude.
+        Ks (float): Ks magnitude.
+        Fe_H (float): Metallicity [Fe/H] (default: -1.0 for typical LMC stars).
+
+    Returns:
+        float: Estimated effective temperature (K).
+    """
+    # Gordon 2003 For the LMC average sample, we find that RV = 3.41 ± 0.06
+
+    A_v=0.3
+    A_Ks = 0.114 * A_v
+    E_VK = A_v - A_Ks  # = A_v * 0.886
+    VK_obs = V - Ks
+    VK_0 = VK_obs - E_VK          # KV-band extinction correction
+
+    if method == "Hernande":
+        # Coefficients from Hernández et al. (2009) table 2 or 5 for V-Ks giants
+        # "A new implementation of the infrared flux method using the 2MASS catalogue"
+    
+        if 0: # something wronge with this! 
+            # table 2 (wider color range)
+            a0, a1, a2, a3, a4, a5, a6 = 2.1304, -1.5438, 0.4562, -0.0483, 0.0132, 0.0456, -0.0026
+            #color_range = [0.7, 3.8]
+
+            theta_eff = (
+                a0
+                + a1 * VK_0
+                + a2 * VK_0**2
+                + a3 * VK_0**3
+                + a4 * VK_0 * Fe_H
+                + a5 * Fe_H
+                + a6 * Fe_H**2
+            )
+        else: #best
+            b0, b1, b2, b3, b4, b5 = 0.5293, 0.2489, -0.0119, -0.0042, 0.0135, 0.0010
+            #color_range = [1.1 , 3.4] # giants
+
+            theta_eff = (
+                b0 
+                + b1 * VK_0
+                + b2 * VK_0**2
+                + b3 * VK_0 * Fe_H
+                + b4 * Fe_H
+                + b5 * Fe_H**2
+            )
+
+    elif method == "Ramirez":
+        # Coefficients from Ramırez et al. (2005) table 3 for V-I
+        # THE EFFECTIVE TEMPERATURE SCALE OF FGK STARS. II. Teff : COLOR : [Fe/H] CALIBRATIONS
+        # 
+        a0, a1, a2, a3, a4, a5 = 0.4405, 0.3272, -0.0252, -0.0016, -0.0053, -0.0040
+
+        theta_eff = (
+            a0
+            + a1 * VK_0
+            + a2 * VK_0**2
+            + a3 * VK_0 * Fe_H
+            + a4 * Fe_H
+            + a5 * Fe_H**2
+        )
+    
+
+    return 5040 / theta_eff # = T_eff 
+
+
+# T_effs=[]
+# for V,Ks in zip(data["<V>"].values, data["Ks"].values):
+#     T_effs.append( teff_giants_KV(V=V,Ks=Ks, Fe_H=-0.19, method = "Hernande") ) #"Ramirez" )) 
+ 
+## T_effs=[]
+## for V,I in zip(data["<V>"].values, data["<I>"].values):
+##     T_effs.append( vis_teff_updated(V=V,I=I, Fe_H=-0.19) )
+ 
+#plt.hist( np.array(T_effs) , bins=np.linspace(1000,8000,100 ) ); plt.show()
+
+################################################################
+################################################################
+################## SETTING UP INLIER FILTERS ###################
+################################################################
+
+
+### This is done above, but repeated here so 
+# PART 2 is indpendent (I should put this in an independant script!)
+# Column names based on the description provided
+# File path
+file_path = "/Users/bencb/Documents/long_secondary_periods/ogle_light_curves/ogleIII_LMC_LPV_catalog_decompressed.dat"
+#path to save figures 
+fig_path="/Users/bencb/Documents/long_secondary_periods/ogle_light_curves/figures/"
+if not os.path.exists(fig_path):
+    os.mkdir(fig_path)
+
+columns = [
+    "Star", "Field", "OGLE", "Type", "GB", "Sp", "RA", "Dec", "<I>", "<V>",
+    "P1 (d)", "Iamp1", "P2 (d)", "Iamp2", "P3 (d)", "Iamp3",
+    "J", "H", "Ks"
+]
+
+# Read the file into a DataFrame
+data = pd.read_csv(file_path, delim_whitespace=True, comment='#', header=None, names=columns)
+
+
+##############
+# Wesenheit index 
+##############
+
+# Calculate Wesenheit index W_JK = Ks - 0.686 * (J - Ks)
+data["W_JK"] = data["Ks"] - 0.686 * (data["J"] - data["Ks"])
+
+
+#############
+# Effective temperature 
+#############
+
+R_V = 3.41
+R_I = 1.85
+R_J = 0.303
+R_KS = 0.118
+
+# Example usage (vis_teff_updated bug is now fixed and looks good!) 
+T_effs=[]
+for V,Ks in zip(data["<V>"].values, data["Ks"].values):
+    T_effs.append( teff_giants_KV(V=V,Ks=Ks, Fe_H=-0.19, method = "Hernande") )
+    #T_effs.append( vis_teff_updated(V=V,I=I, Fe_H=-0.19) )
+
+## add it to data 
+data["Teff_est_1"] = np.array( T_effs )  
+
+plt.figure()
+fs = 15
+bin_max, bin_min, Nbins = 800,6400,30
+plt.hist( data['Teff_est_1'].values , density = False ,  bins = np.linspace(bin_max, bin_min, Nbins))
+plt.xlabel(r'$T_{eff}$ [K]',fontsize=fs)
+plt.ylabel('Frequency',fontsize=fs)
+plt.gca().tick_params(labelsize=fs)
+plt.show() 
+
+
+#########
+# Limb darken coefficients
+#########
+def get_linear_ldc(teff, logg, feh, table_df):
+    """
+    Returns the linear limb darkening coefficient closest to input Teff, logg, and [Fe/H].
+
+    Parameters:
+    - teff: Effective temperature [K]
+    - logg: Surface gravity [log10(cm/s^2)]
+    - feh: Metallicity [dex]
+    - table_df: DataFrame containing the linear limb darkening table (tableu)
+
+    Returns:
+    - Row (dict) with closest match and coefficient(s)
+    """
+    df = table_df.copy()
+    df['delta'] = ((df['Teff'] - teff)**2 + (df['logg'] - logg)**2 + (df['[Fe/H]'] - feh)**2)
+    best_match = df.loc[df['delta'].idxmin()]
+    return best_match.to_dict()
+
+
+
+
+pop_dist_thresh = 0.13 
+
+def count_inliers_from_filter(x, y, a, b, d_max):
+    """Wrapper using your existing function."""
+    _, _, _, mask = filter_points_within_distance(x, y, a, b, d_max)
+    return np.sum(mask)
+
+# Setup
+x_data = np.log10(data["P1 (d)"])
+y_data = data["W_JK"]
+d_max = 0.1  # your distance_modulus
+
+# Parameter grid to search
+a_vals = np.linspace(-5.0, -3.5, 100)
+b_vals = np.linspace(21.0, 26.0, 100)
+
+best_a, best_b, best_count = None, None, -1
+
+for a, b in product(a_vals, b_vals):
+    count = count_inliers_from_filter(x_data, y_data, a, b, d_max)
+    if count > best_count:
+        best_a, best_b, best_count = a, b, count
+
+
+a0, b0 = best_a , best_b #-4.7, 24.0
+initial_distance_modulus = 0.2
+
+x_data = np.log10(data["P1 (d)"])
+y_data = data["W_JK"]
+
+# Get inlier mask
+x_filt, y_filt, _, mask = filter_points_within_distance(x_data, y_data, a0, b0, initial_distance_modulus )
+
+# Perform standard linear regression on filtered data
+slope_D, intercept_D, r_value_D, p_value_D, std_err_D = linregress(x_filt, y_filt)
+
+print(f"Fitted slope: {slope_D:.3f} ± {std_err_D:.3f}")
+
+print(f"Optimal fit: y = {best_a:.3f} * logP + {best_b:.3f}")
+print(f"Number of inliers: {best_count}")
+
+### The best firt 
+## Optimal fit: y = -4.985 * logP + 24.737
+## Number of inliers: 10393
+
+#### Four Dhalf we solve where D line is 1/2 period for wjk = 12 
+w = 12 # wjk index where we want exact match of 1/2 period 
+intercept_Dhalf  = w - slope_D * np.log10( 10**((w - intercept_D)/slope_D )/2  )
+
+slope_Dhalf = slope_D
+
+_, _ , _, seq_Dhalf_mask = filter_points_within_distance(x_data, y_data, slope_Dhalf, intercept_Dhalf, pop_dist_thresh)
+
+#In [11]: slope_Dhalf, -4.2813950234882
+
+#### in the paper from the above analysis i use numbers 
+slope_Dhalf = -4.2813950234882
+intercept_Dhalf = 21.58247347257681
+
+slope_D = -4.2813950234882
+intercept_D = 22.871301797933256
+
+
+### use this distance modulus for the masks 
+distance_modulus = 0.13 # Maximum distance from the line
+# mask for data on the sequence D1/2 line 
+_,_,_, mask_1 = filter_points_within_distance(
+    x_data, y_data, slope_Dhalf, intercept_Dhalf, distance_modulus
+)
+
+_, _, _, mask_2 = filter_points_within_distance(
+    x_data, y_data, slope_D, intercept_D, distance_modulus
+)
+
+
+# get all the numbers corresponding to sequence D1/2 
+sdhalf_stars = np.array( [d[0] for d in  data.index[mask_1] ] ) 
+sd_stars = np.array( [d[0] for d in  data.index[mask_2] ] )
+
+D_set = list( sdhalf_stars ) + list( sd_stars ) 
+
+################################################################
+################################################################
+
+# Constants
+h = 6.62607015e-34  # Planck constant (J.s)
+c = 3.0e8           # Speed of light (m/s)
+k_B = 1.380649e-23  # Boltzmann constant (J/K)
+# Constants for Wien's law
+wien_constant = 2898e-6  # Wien's displacement constant in meters·Kelvin
+
+m,l=1,1 # mode 
+nu = 1  # Frequency (Hz)
+psi_T = 0  # Phase offset (rad)
+wavelength = 806e-9  # Fixed observed wavelength (I-band)
+
+theta = np.linspace(0, np.pi, 20)  # Stellar colatitude
+phi = np.linspace(0, 2 * np.pi, 20)  # Stellar longitude
+theta, phi = np.meshgrid(theta, phi)
+
+tgrid = np.linspace(-8 / nu, 8 / nu, 100)  # Time grid
+grid_size = 500
+
+delta_T_eff_range = [0, 1000]  # Dipole amplitude range (K)
+
+# fft frequency defined by our temporal grid
+f = np.fft.fftfreq(n = len( tgrid),  d = np.diff( tgrid )[0] )
+
+sim_dict = {'flux_ts':[],'flux_fft':[], 'T_eff':[], 'delta_T_eff':[] } 
+for k in data:
+    sim_dict[k] = []
+
+bad_idx_list = []
+
+NN = len( D_set )
+
+claret_2011_table = fits.open( "/Users/bencb/Documents/long_secondary_periods/phoenix_model_grid_limb_dark/claret_2011_lin_limbdark_grid.fit")
+
+for ct ,i in enumerate( D_set  ): #list( set( sdhalf_stars ) + set(sd_stars)) #range(NN):
+    print(ct / NN * 100)
+    T_eff = data["Teff_est_1"].loc[i].values[0] # + 500 # 500 was first attempt (with T_eff est no metallicity fn)
+
+    if 1: #T_eff > 500: # we had a few zeros 
+        delta_T_eff = np.random.uniform(*delta_T_eff_range)
+        theta_obs, phi_obs = random_inclination()
+
+        # Generate light curve
+        flux = []
+        for t in tgrid:
+            T_eff_local = thermal_oscillation(theta=theta, 
+                                            phi=phi, 
+                                            t=t, 
+                                            T_eff=T_eff, 
+                                            delta_T_eff=delta_T_eff,
+                                            l=l,
+                                            m=m,
+                                            nu=nu,
+                                            psi_T=psi_T)
+            
+            intensity = blackbody_intensity(T_eff_local, wavelength)
+            theta_rot, phi_rot = rotate_to_observer_frame(theta, phi, theta_obs, phi_obs)
+
+            # PHEONIX AND  MODEL GRID RESULTS 
+            pp = get_nearest_limb_darkening_coefficient(hdul=claret_2011_table, 
+                                                        teff=T_eff, 
+                                                        logg = 0,  # cole/gpt
+                                                        feh = -0.4,  # cole 2005
+                                                        filt = "I", 
+                                                        verbose=False)
+            
+            # Apply limb darkening with the current coefficient
+            intensity_ld = limb_darkening(theta_rot, intensity, model="linear", u=pp[4])
+
+            #intensity_ld = limb_darkening(theta_rot, intensity, model="powerlaw", u=0.5) #limb_darkening(theta_rot, intensity, model="linear", u=u)
+            
+            #  Project the intensity (with limb darkening applied) onto the observer's plane
+            projected_intensity = project_to_observer_plane(theta_rot, phi_rot, intensity_ld, grid_size=grid_size)
+            
+            #f0 = np.sum(projected_intensity)
+            flux.append( np.sum(projected_intensity) )
+
+        fft = np.fft.fft( flux )**2 # added in ^2 after 4/aug/25 (post sim_dict_1-5)
+
+
+        sim_dict['flux_ts'].append( flux )
+        sim_dict['flux_fft'].append( fft )
+        sim_dict['T_eff'].append( T_eff )
+        sim_dict["delta_T_eff"].append( delta_T_eff )
+        for k in data:
+            sim_dict[k].append( data[k].loc[i].values[0] )
+
+
+    else:
+        bad_idx_list.append( i )
+
+
+# find which index is closest to 1 and 2 
+
+classify_on_mag = True 
+
+if classify_on_mag:
+
+    sim_dict['mag_ts'] = []
+    sim_dict['mag_fft'] = []
+
+    for flux in sim_dict['flux_ts']:
+        flux = np.clip(flux, 1e-10, None)  # avoid log of zero or negative values
+        mag = -2.5 * np.log10(flux)
+        sim_dict['mag_ts'].append(mag)
+
+        fft = np.fft.fft( mag )
+        sim_dict['mag_fft'].append( fft )
+
+
+
+    sim_dict['mag_peak_idx'] = [np.argmax( abs( np.array(fft) )[1:len(fft)//2] ) for fft in sim_dict['mag_fft']]
+
+
+    np.unique(  sim_dict['mag_peak_idx'] )
+    # Dhalf/ D = second harmonic (f2) / primary (f1) 
+
+    f1 = 15  ### This should always be checked .. maybe automized 
+    f2 = 31
+    sim_dict['f2/f1'] = [abs( np.array(fft) )[f2] / abs( np.array(fft) )[f1] for fft in sim_dict['flux_fft']]
+
+
+    """
+    the key point:
+
+    OGLE operates in magnitudes from the start, so the fractional variation is implicitly encoded by the logarithmic scale.
+    Whereas in your case:
+
+    You're working in linear flux, so you need to first convert the linear amplitude into a relative variation,
+    Then apply the logarithmic transformation to get magnitudes.
+    """
+    NN = len( sim_dict['mag_fft'] )
+    sim_dict['amp'] = [
+        2 * abs(fft[fidx]) / len(fft)  # or np.sum(flux)/len(flux)
+        for fft, fidx in zip(sim_dict['mag_fft'], sim_dict['mag_peak_idx'])
+    ]
+
+    filt_D = np.array( sim_dict['mag_peak_idx'] ) < (f1+f2)/2
+    filt_Dhalf = np.array( sim_dict['mag_peak_idx'] ) > (f1+f2)/2
+
+
+else: # do it on flux <- DONT DO THIS WAY 
+    sim_dict['fft_peak_idx'] = [np.argmax( abs( np.array(fft) )[1:len(fft)//2] ) for fft in sim_dict['flux_fft']]
+
+    np.unique(  sim_dict['fft_peak_idx'] )
+    # Dhalf/ D = second harmonic (f2) / primary (f1) 
+
+    f1 = 15
+    f2 = 31
+    sim_dict['f2/f1'] = [abs( np.array(fft) )[f2] / abs( np.array(fft) )[f1] for fft in sim_dict['flux_fft']]
+
+
+    #sim_dict['amp'] =  [abs( fft[fidx] ) for fft,fidx in zip(sim_dict['flux_fft'], sim_dict['fft_peak_idx'])]
+
+    # Estimate I-band magnitude amplitude consistently with OGLE-III: 
+    # compute the fractional flux variation at the dominant frequency (delta F / F), 
+    # later we convert to magnitude using A_mag = 2.5 * log10(1 + delta F / F)
+    """
+    the key point:
+
+    OGLE operates in magnitudes from the start, so the fractional variation is implicitly encoded by the logarithmic scale.
+    Whereas in your case:
+
+    You're working in linear flux, so you need to first convert the linear amplitude into a relative variation,
+    Then apply the logarithmic transformation to get magnitudes.
+    """
+
+    sim_dict['amp'] = [
+        abs(fft[fidx]) / np.abs(np.mean(flux))  # or np.sum(flux)/len(flux)
+        for fft, fidx, flux in zip(sim_dict['flux_fft'], sim_dict['fft_peak_idx'], sim_dict['flux_ts'])
+    ]
+
+    filt_D = np.array( sim_dict['fft_peak_idx'] ) < (f1+f2)/2
+    filt_Dhalf = np.array( sim_dict['fft_peak_idx'] ) > (f1+f2)/2
+
+
+#plt.hist( sim_dict['f2/f1'] , bins = np.logspace(-3,1,30) ); plt.xlabel("f2/f1") ;plt.xscale('log');plt.show()
+
+#import json
+import numpy as np
+def convert_for_json(obj):
+    if isinstance(obj, dict):
+        return {k: convert_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_for_json(i) for i in obj]
+    elif isinstance(obj, np.ndarray):
+        return convert_for_json(obj.tolist())
+    elif isinstance(obj, complex):
+        return {"__complex__": True, "real": obj.real, "imag": obj.imag}
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    else:
+        return obj
+
+# Convert and save
+serializable_sim_dict = convert_for_json(sim_dict)
+
+with open("/Users/bencb/Documents/long_secondary_periods/ogle_light_curves/sim_dict_5.json", "w") as f:
+    json.dump(serializable_sim_dict, f, indent=4)
+
