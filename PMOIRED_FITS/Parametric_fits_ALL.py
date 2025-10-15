@@ -57,6 +57,10 @@ if __name__=="__main__":
                         help="plot V^2 in log scale")
     parser.add_argument("--plot_image_logscale", action='store_true',
                         help="plot image reco in log scale")
+    # added post RT Pav second peer review
+    parser.add_argument("--outside_UD", action='store_true',
+                        help="for binary model, search for companion outside UD diameter")
+    
     # Parse arguments and run the script
     args = parser.parse_args()
 
@@ -267,18 +271,13 @@ if __name__=="__main__":
 
 
     #if __name__ == '__main__':
-    oi = pmoired.OI(obs_files , binning = binning)
-
-    # Define the grid for parameter exploration
-    # expl = {
-    #     'grid': {
-    #         'r,incl': (30, 90, 10),  # Inclination
-    #         'r,projang': (-90, -50, 20),  # Position angle
-    #         'r,diamin': (10, 200, 20),  # Inner diameter
-    #         'r,diamout': (20, 500, 40),  # Outer diameter
-    #     }
-    # }
-
+    
+    if 'gravity' not in ins:
+        oi = pmoired.OI(obs_files , binning = binning)
+    else:  ## added after peer review 2 
+        oi = pmoired.OI(obs_files , insname='GRAVITY_SC_P1', binning = binning)
+        
+        
 
 
     ############################
@@ -294,12 +293,16 @@ if __name__=="__main__":
         oi.setupFit({
             'obs': ['V2', 'T3PHI'], 
             'wl ranges': [[wavemin, wavemax]],
-            'min relative error': {'V2': min_rel_V2_error, 'CP': min_rel_CP_error},
-            'max relative error': {'V2': max_rel_V2_error, 'CP': max_rel_CP_error}
+            'min relative error': {'V2': min_rel_V2_error, 'T3PHI': min_rel_CP_error},
+            'max relative error': {'V2': max_rel_V2_error, 'T3PHI': max_rel_CP_error}
         })
 
         oi.gridFit(expl, model=param, doNotFit=[] ) 
 
+        # then do final fit init at best fit from grid search
+        oi.doFit()
+
+        print( f"ndof = {oi.bestfit['ndof']}")
 
     # elif model == 'LD':
 
@@ -328,36 +331,140 @@ if __name__=="__main__":
         oi.setupFit({
             'obs': ['V2', 'T3PHI'], 
             'wl ranges': [[wavemin, wavemax]],
-            'min relative error': {'V2': min_rel_V2_error, 'CP': min_rel_CP_error},
-            'max relative error': {'V2': max_rel_V2_error, 'CP': max_rel_CP_error}
+            'min relative error': {'V2': min_rel_V2_error, 'T3PHI': min_rel_CP_error},
+            'max relative error': {'V2': max_rel_V2_error, 'T3PHI': max_rel_CP_error}
         })
 
         oi.gridFit(expl, model=param, doNotFit=[] ) #, prior=[('inc', '<=', 90),('inc', '>=', 0),('projang', '<=', 90),('projang', '>=', -90)])
 
+        # then do final fit init at best fit from grid search
+        oi.doFit()
+
+        print( f"ndof = {oi.bestfit['ndof']}")
 
     elif model == 'binary':
 
-        step = 180*3600*1000e-6/np.pi/ 120 #60
-        R = np.mean(oi.data[0]['WL']/oi.data[0]['dWL'])
+        param = {'*,ud': ud_wvl, '*,f': 1, 'c,f': 0.01, 'c,x': 4, 'c,y': 4, 'c,ud': 0.}
 
-        param = {'*,ud':ud_wvl, '*,f':1, 'c,f':0.01, 'c,x':4, 'c,y':4, 'c,ud':0.}
-        
-        # -- define the exploration pattern
-        expl = {'grid':{'c,x':(-R/2*step, R/2*step, step), 'c,y':(-R/2*step, R/2*step, step)}}
-        
+        step = 180*3600*1000e-6/np.pi/120
+        R = np.mean(oi.data[0]['WL']/oi.data[0]['dWL'])
+        expl = {'grid': {'c,x': (-R/2*step, R/2*step, step),
+                        'c,y': (-R/2*step, R/2*step, step)}}
+
         oi.setupFit({
-            'obs': ['V2', 'T3PHI'], 
+            'obs': ['V2','T3PHI'],
             'wl ranges': [[wavemin, wavemax]],
-            'min relative error': {'V2': min_rel_V2_error, 'CP': min_rel_CP_error},
-            'max relative error': {'V2': max_rel_V2_error, 'CP': max_rel_CP_error}
+            'min relative error': {'V2': min_rel_V2_error, 'T3PHI': min_rel_CP_error},
+            'max relative error': {'V2': max_rel_V2_error, 'T3PHI': max_rel_CP_error}
         })
 
+        expr = 'np.sqrt((c,x)**2 + (c,y)**2)'
+        res_limit = np.mean(oi.data[0]['WL']) * 1e-6 / (2 * 100) * 180/3.14 * 1000 * 3600 # lambda/(2B_max) # in mas
+        # radial constraints on companion separation
+        inner = 3 #np.max([ res_limit, ud_wvl /2])
+        outer = np.min( [R*step/2 , 80] ) # reliable FOV limit = R * step / 2, but cap at 80mas to avoid too large FOV - mainly for gravity that has large R 
 
-        oi.gridFit(expl, model=param, doNotFit=['*,f', 'c,ud'], prior=[('c,f', '<', 1)], 
-                    constrain=[('np.sqrt(c,x**2+c,y**2)', '<=', R*step/2),
-                                ('np.sqrt(c,x**2+c,y**2)', '>', step/2) ])
+        if not args.outside_UD:
+            print(f"searching for companion without UD diameter constraint (companion can be inside UD). Outer constraint is reliable FOV = {outer:.2f}mas")
+            
+            constraints = [(expr, '<=', outer),
+                        (expr, '>',  step/2)]
+        else:
+            print(f"searching for companion with diameter constraint (companion MUST be outside radius = {(inner):.2f}mas for instrument: {ins}). Outer constraint is reliable FOV = {outer:.2f}mas")
+            constraints = [(expr, '<=', outer),
+                        (expr, '>', inner)]
 
-        #oi.doFit(param, doNotFit=['*,f', 'c,ud'])
+        # reference UD fit with no companion
+        oi.doFit({'ud':4})
+        bestUD = oi.bestfit['best']
+
+        oi.gridFit(expl, model=param, doNotFit=['*,f','c,ud'],
+                prior=[('c,f','<',1)],
+                constrain=constraints)
+
+        # -- show the grid result
+        #oi.showGrid(interpolate=True, logV=1, cmap='gist_stern')
+        oi.showGrid(interpolate=True, tight=True, significance=bestUD)
+        # -- show the data and the best fit model
+        plt.savefig("test_significance_grid_plot.png")
+        oi.show()
+
+        _ = input("Check grid search plot. Press Enter to continue to refine the fit with all parameters free...")
+        """
+        From https://github.com/amerand/PMOIRED_examples/blob/main/notebooks/EX5%20Binary%20with%20spectroscopic%20lines.ipynb
+        
+        "we can see that the model is not perfect and tends to somewhat over estimate the visibility: 
+        this could be due to the fact the star are actually partially resolved. We can try to re-fit the 
+        model but allowing all the parameters to be fitted, including the sizes of the stars, by setting 
+        doNotFit=[] in oi.doFit. By default, if no initial parameters are give to doFit, it will use the 
+        last best fit model (the one found by gridFit above)." """
+    
+        oi.doFit(param, doNotFit=['*,f','c,ud']) #,constrain=constraints)
+        #oi.show(imFov=20, imX=oi.bestfit['best']['c,x']/2, imY=oi.bestfit['best']['c,y']/2)
+        
+
+        print( f"ndof = {oi.bestfit['ndof']}")
+        # bootstrapping uncertainty 
+        _ = input("ready for bootstrapping to estimate uncertaintys? Press Enter to continue...")
+        oi.bootstrapFit(Nfits=500)
+        oi.showBootstrap()
+
+
+
+
+
+        ## Prior to peer review 2 
+        ## -----------------------------------------------------
+        # step = 180*3600*1000e-6/np.pi/ 120 #60
+        # R = np.mean(oi.data[0]['WL']/oi.data[0]['dWL'])
+
+        # param = {'*,ud':ud_wvl, '*,f':1, 'c,f':0.01, 'c,x':4, 'c,y':4, 'c,ud':0.}
+        
+        # # -- define the exploration pattern
+        # expl = {'grid':{'c,x':(-R/2*step, R/2*step, step), 'c,y':(-R/2*step, R/2*step, step)}}
+        
+        # oi.setupFit({
+        #     'obs': ['V2', 'T3PHI'], 
+        #     'wl ranges': [[wavemin, wavemax]],
+        #     'min relative error': {'V2': min_rel_V2_error, 'CP': min_rel_CP_error},
+        #     'max relative error': {'V2': max_rel_V2_error, 'CP': max_rel_CP_error}
+        # })
+
+
+    
+        # # -- actual grid fit
+        # if not args.outside_UD:
+        #     print(f"searching for companion without UD diameter constraint (companion can be inside UD). Outer constraint is reliable FOV = {R*step/2:.2f}mas")
+            
+        #     constraints = [('np.sqrt(c,x**2+c,y**2)', '<=', R*step/2),
+        #                         ('np.sqrt(c,x**2+c,y**2)', '>', step/2) ]
+            
+        #     # oi.gridFit(expl, model=param, doNotFit=['*,f', 'c,ud'], prior=[('c,f', '<', 1)], 
+        #     #         constrain=[('np.sqrt(c,x**2+c,y**2)', '<=', R*step/2),
+        #     #                     ('np.sqrt(c,x**2+c,y**2)', '>', step/2) ])
+        
+        # else:
+        #     print(f"searching for companion with UD diameter constraint (companion MUST be outside UD radius = {(ud_wvl/2):.2f}mas for instrument: {ins}). Outer constraint is reliable FOV = {R*step/2:.2f}mas")
+        #     # TO fit outside UD diameter 
+        #     # constraints = [('np.sqrt(c,x**2+c,y**2)', '<=', R*step/2),
+        #     #         ('np.sqrt(c,x**2+c,y**2)', '>', ud_wvl/2) ]
+            
+            
+        #     # R*step / 2 is reliable FOV 
+        #     constraints = [('np.sqrt((c,x)**2+(c,y)**2)', '<=', R*step/2),
+        #                    ('np.sqrt((c,x)**2+(c,y)**2)', '>', ud_wvl/2) ]
+
+        # oi.gridFit(expl, model=param, doNotFit=['*,f', 'c,ud'], prior=[('c,f', '<', 1)], 
+        #         constrain=constraints)
+        
+        # # before second peer review where we did not constrain inner separation to be outside UD
+        # # oi.gridFit(expl, model=param, doNotFit=['*,f', 'c,ud'], prior=[('c,f', '<', 1)], 
+        # #             constrain=[('np.sqrt(c,x**2+c,y**2)', '<=', R*step/2),
+        # #                         ('np.sqrt(c,x**2+c,y**2)', '>', step/2) ])
+
+        # #oi.doFit(param, doNotFit=['*,f', 'c,ud'])
+        
+            
 
     elif model == 'disk':
         #
@@ -403,8 +510,8 @@ if __name__=="__main__":
         oi.setupFit({
             'obs': ['V2', 'T3PHI'], 
             'wl ranges': [[wavemin, wavemax]],
-            'min relative error': {'V2': min_rel_V2_error, 'CP': min_rel_CP_error},
-            'max relative error': {'V2': max_rel_V2_error, 'CP': max_rel_CP_error}
+            'min relative error': {'V2': min_rel_V2_error, 'T3PHI': min_rel_CP_error},
+            'max relative error': {'V2': max_rel_V2_error, 'T3PHI': max_rel_CP_error}
         })
 
 

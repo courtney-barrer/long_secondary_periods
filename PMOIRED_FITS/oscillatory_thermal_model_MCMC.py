@@ -713,40 +713,40 @@ theta_o, phi_o, delta_T, UD_diam = np.deg2rad(170),  np.deg2rad(168),  212 , 3.2
 default_kwargs['return_chi2'] = False 
 v2c, cp2c = thermal_dipole_fit(fit_param=[theta_o, phi_o, delta_T, UD_diam ],  **default_kwargs)
 
-# to plot it ...
-fs = 15
-plt.figure()
+# # to plot it ...
+# fs = 15
+# plt.figure()
 
-plt.errorbar( x=flatten(get_all_values(v2c['B/wl_data'])) , 
-             y=np.clip( flatten(get_all_values(v2c['V2_data'])), a_min=1e-4, a_max=None),
-             yerr= np.clip( flatten(get_all_values(v2c['V2err_data'])), a_min=0.001, a_max=None),
-             fmt='.', color='grey',alpha =0.5, label='data')
-plt.plot( flatten(get_all_values(v2c['B/wl_data'])) ,
-         flatten(get_all_values(v2c['V2_model'])), 
-         '.',color='blue', alpha=0.5, label='convective dipole model')
-plt.yscale('log')
-plt.legend(fontsize=fs)
-plt.xlabel(r'$B/\lambda$ [rad$^{-1}$]',fontsize=fs)
-plt.ylabel(r'$|V|^2$',fontsize=fs)
-plt.gca().tick_params(labelsize=fs )
-plt.savefig(f'V2_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
-plt.show()
+# plt.errorbar( x=flatten(get_all_values(v2c['B/wl_data'])) , 
+#              y=np.clip( flatten(get_all_values(v2c['V2_data'])), a_min=1e-4, a_max=None),
+#              yerr= np.clip( flatten(get_all_values(v2c['V2err_data'])), a_min=0.001, a_max=None),
+#              fmt='.', color='grey',alpha =0.5, label='data')
+# plt.plot( flatten(get_all_values(v2c['B/wl_data'])) ,
+#          flatten(get_all_values(v2c['V2_model'])), 
+#          '.',color='blue', alpha=0.5, label='convective dipole model')
+# plt.yscale('log')
+# plt.legend(fontsize=fs)
+# plt.xlabel(r'$B/\lambda$ [rad$^{-1}$]',fontsize=fs)
+# plt.ylabel(r'$|V|^2$',fontsize=fs)
+# plt.gca().tick_params(labelsize=fs )
+# plt.savefig(f'V2_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
+# plt.show()
 
 
-plt.figure()
-plt.errorbar( x=flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
-         y=flatten(get_all_values(cp2c['CP_data'])), 
-         yerr= flatten(get_all_values(cp2c['CPerr_data'])),
-          fmt='.', color='grey',alpha =0.5, label='data')
-plt.plot( flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
-         flatten(get_all_values(cp2c['CP_model'])), 
-         '.', color='blue', alpha=0.5, label='convective dipole model')
-plt.legend(fontsize=fs)
-plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]',fontsize=fs)
-plt.ylabel('Closure Phase [rad]',fontsize=fs)
-plt.gca().tick_params(labelsize=fs )
-plt.savefig(f'CP_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
-plt.show()
+# plt.figure()
+# plt.errorbar( x=flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
+#          y=flatten(get_all_values(cp2c['CP_data'])), 
+#          yerr= flatten(get_all_values(cp2c['CPerr_data'])),
+#           fmt='.', color='grey',alpha =0.5, label='data')
+# plt.plot( flatten(get_all_values(cp2c['Bmax/wl_data'])) , 
+#          flatten(get_all_values(cp2c['CP_model'])), 
+#          '.', color='blue', alpha=0.5, label='convective dipole model')
+# plt.legend(fontsize=fs)
+# plt.xlabel(r'$B_{max}/\lambda$ [rad$^{-1}$]',fontsize=fs)
+# plt.ylabel('Closure Phase [rad]',fontsize=fs)
+# plt.gca().tick_params(labelsize=fs )
+# plt.savefig(f'CP_{ins}_thermal_dipole_fit.png',bbox_inches='tight', dpi=300)
+# plt.show()
 
 
 
