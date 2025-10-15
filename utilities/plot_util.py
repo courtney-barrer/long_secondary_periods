@@ -235,6 +235,9 @@ def simulate_obs_from_image_reco( obs_files, image_file , binning=None, insname=
                 mjd0 = a[ 'MJD'], #[mjd], #a[ 'MJD'],\
                 cube = cube ) 
         )
+        
+        fake_obs_list[-1]["filename"] = a.get("filename",None) # added so consistent sorting can be done between oi and oif
+
 
     # makefake does some operation on MJD so still doesn't match.  
     oif.data = fake_obs_list
@@ -244,6 +247,79 @@ def simulate_obs_from_image_reco( obs_files, image_file , binning=None, insname=
     oi.data = sorted(oi.data, key=lambda x: x['MJD'][0]) # have to take first one because sometimes a list 
     
     oif.data = sorted(oif.data, key=lambda x: x['MJD'][0])
+    
+    ## SILLY BUG IN PMOIRED WHERE BASELINE/TRIANGLE KEYS ARE INCONSISTENT (e.g. 'D0C1' then 'C1D0')
+    ## we fix this here by ordering all relevant keys
+    change_baseline_key_list = ['baselines','OI_VIS2','OI_VIS']
+    change_triangle_key_list = ['triangles','OI_T3']
+    enforce_ordered_baselines_keys(oi.data, change_baseline_key_list)
+    enforce_ordered_baselines_keys(oif.data, change_baseline_key_list)
+    enforce_ordered_triangle_keys(oi.data, change_triangle_key_list)
+    enforce_ordered_triangle_keys(oif.data, change_triangle_key_list)
+
+    return( oi, oif )
+
+
+
+
+def simulate_obs_from_image_reco_dontsort( obs_files, image_file , binning=None, insname=None):
+    # insname='GRAVITY_SC_P1' for gravity data !!!! 
+     # change wvl_band_dict[feature] to wvl_lims
+    d_model = fits.open( image_file )
+    
+    img = d_model[0].data
+
+    #assert (abs( float( d_model[0].header['CUNIT2'] ) ) - abs( float(  d_model[0].header['CUNIT1']) ) ) /  float( d_model[0].header['CDELT1'] ) < 0.001
+    # we assert the image has to be square..
+    #assert abs(float( d_model[0].header['CDELT2'])) == abs(float(d_model[0].header['CDELT1']))
+
+    img_units = d_model[0].header['CUNIT1']
+
+    img_pixscl = d_model[0].header['CDELT1']     
+    if img_units == 'deg':
+        img_pixscl *= 3600*1e3 # convert to mas
+    if img_units == 'mas':
+        pass 
+    else:  
+        raise TypeError('Units not recognized')
+
+    oi = pmoired.OI(obs_files, dMJD=1e9, binning=binning, insname=insname)
+
+    oif = pmoired.OI()
+
+    fake_obs_list = []
+    for a in oi.data: 
+        
+        cube = {}
+        cube['scale'] = img_pixscl # mas / pixel
+        x = img_pixscl * np.linspace(-img.shape[0]//2, img.shape[0]//2, img.shape[0])  # mas
+        y = img_pixscl * np.linspace(-img.shape[0]//2, img.shape[0]//2, img.shape[0])  # mas
+        cube['X'] , cube['Y'] =  np.meshgrid(x, y)
+        cube['image'] = np.array([ img  for _ in a['WL']] )
+        cube['WL'] = a['WL']
+        
+        if hasattr(a['MJD'], '__len__'):
+            mjd = np.median( a['MJD'] ) 
+            
+        fake_obs_list.append( 
+            pmoired.oifake.makeFakeVLTI(\
+                t= a['telescopes'],\
+                target = ( a['header']['RA']* 24 / 360 , a['header']['DEC'] ),\
+                lst = [a['LST']], \
+                wl = a['WL'], \
+                mjd0 = a[ 'MJD'], #[mjd], #a[ 'MJD'],\
+                cube = cube ) 
+        )
+        
+        fake_obs_list[-1]["filename"] = a.get("filename",None) # added so consistent sorting can be done between oi and oif
+
+    # makefake does some operation on MJD so still doesn't match.  
+    oif.data = fake_obs_list
+
+    # sort data by MJD - issues with Gravity when x['MJD'] is a list... TO DO 
+    
+    # oi.data = sorted(oi.data, key=lambda x: x['MJD'][0]) # have to take first one because sometimes a list 
+    # oif.data = sorted(oif.data, key=lambda x: x['MJD'][0])
     
     ## SILLY BUG IN PMOIRED WHERE BASELINE/TRIANGLE KEYS ARE INCONSISTENT (e.g. 'D0C1' then 'C1D0')
     ## we fix this here by ordering all relevant keys
@@ -1646,6 +1722,211 @@ def project_to_observer_plane(theta_rot, phi_rot, intensity, grid_size=500):
 
 
 
+
+
+# # with less control of pixelscale etc 
+# def create_thermal_dipole_prior(
+#     save_fits_path='/home/rtc/Documents/long_secondary_periods/PMOIRED_FITS/best_models/',
+#     wavelength=1.6e-6,           # m
+#     Npixels=10,
+#     UD=3.3,                      # mas
+#     psi_T_arg=0,                 # will be overridden to 0 below (matching your script)
+#     delta_T=212,
+#     T_eff=3000,
+#     incl=170,                    # deg
+#     projang=172,                 # deg
+#     l=1,
+#     m=1,
+#     plot=True,                   # kept for signature parity; not used
+#     save_name='thermal_dipole_prior.fits'
+# ):
+#     # Recompute pixel size from wavelength (same formula, same rounding)
+#     pixelsize = round(wavelength / (4 * 120) * 1e3 * 3600 * 180 / np.pi, 2)
+
+#     # Ensure output directory exists
+#     if not os.path.exists(save_fits_path):
+#         os.makedirs(save_fits_path)
+
+#     # Derived parameters (unchanged from your script)
+#     grid_size = int(UD / pixelsize)
+#     dx = pixelsize
+#     dy = pixelsize
+#     pad_factor = Npixels / max(grid_size, 1)
+
+#     # Legacy variable names / conversions
+#     theta_o = np.deg2rad(incl)
+#     phi_o   = np.deg2rad(projang)
+
+#     nu = 1 / (757 * 24 * 60 * 60)  # Hz
+#     psi_T = 0  # exact override as in your script
+
+#     # Stellar surface grid (same resolution)
+#     theta = np.linspace(0, np.pi, 200)
+#     phi   = np.linspace(0, 2*np.pi, 200)
+#     theta, phi = np.meshgrid(theta, phi)
+
+#     # Header metadata (same keys/content)
+#     header_dict = {
+#         "wvl": wavelength,
+#         "psi_T": psi_T,
+#         "nu": nu,
+#         "l": l,
+#         "m": m,
+#         "delta_T_eff": delta_T,
+#         "T_eff": T_eff,
+#         "phi_obs": phi_o,
+#         "theta_obs": theta_o,
+#     }
+
+#     # Local effective temperature (unchanged call order)
+#     T_eff_local = thermal_oscillation(theta, phi, 0, T_eff, delta_T, l, m, nu, psi_T)
+
+#     # Rotate to observer frame
+#     theta_rot, phi_rot = rotate_to_observer_frame(theta, phi, theta_o, phi_o)
+
+#     # Project onto the observer plane
+#     projected_intensity = project_to_observer_plane(
+#         theta_rot, phi_rot,
+#         blackbody_intensity(T_eff_local, wavelength),
+#         grid_size=grid_size
+#     )
+
+#     # Zero-padding to reach (approximately) Npixels (same scalar pad usage)
+#     pad_n = int(projected_intensity.shape[0] * pad_factor)
+#     projected_intensity = np.pad(projected_intensity, pad_n, mode='constant', constant_values=0)
+
+#     # Save FITS (same helper + header)
+#     out_path = os.path.join(save_fits_path, save_name)
+#     intensity_2_fits(projected_intensity, dx=dx, dy=dy, name=save_name,
+#                                data_path=save_fits_path, header_dict=header_dict)
+
+#     return out_path, projected_intensity
+
+
+
+
+def simulate_obs_from_image_reco_FAST( oi, image_file , img_pixscl = None):
+    # FAST because we don't re-read in obs_files to generate oi each time 
+
+    if type(image_file)==str: #then passing a fits file name
+
+        with fits.open(image_file) as d_model:
+            img = d_model[0].data
+
+            #assert (abs( float( d_model[0].header['CUNIT2'] ) ) - abs( float(  d_model[0].header['CUNIT1']) ) ) /  float( d_model[0].header['CDELT1'] ) < 0.001
+            # we assert the image has to be square..
+            #assert abs(float( d_model[0].header['CDELT2'])) == abs(float(d_model[0].header['CDELT1']))
+            
+            img_units = d_model[0].header['CUNIT1']
+
+    else: # its a open fits file
+        d_model = image_file
+        img = d_model[0].data
+        img_units = d_model[0].header['CUNIT1']
+        
+    if img_pixscl is None:
+        img_pixscl = d_model[0].header['CDELT1']     
+
+    if img_units == 'deg':
+        img_pixscl *= 3600*1e3 # convert to mas
+    if img_units == 'mas':
+        pass 
+    else:  
+        raise TypeError('Units not recognized')
+
+    #oi = pmoired.OI(obs_files, binning = binning, insname = insname)
+
+    oif = pmoired.OI()
+
+    fake_obs_list = []
+    for a in oi.data: 
+        
+        cube = {}
+        cube['scale'] = img_pixscl # mas / pixel
+        x = img_pixscl * np.linspace(-img.shape[0]//2, img.shape[0]//2, img.shape[0])  # mas
+        y = img_pixscl * np.linspace(-img.shape[0]//2, img.shape[0]//2, img.shape[0])  # mas
+        cube['X'] , cube['Y'] =  np.meshgrid(x, y)
+        cube['image'] = np.array([ img  for _ in a['WL']] )
+        cube['WL'] = a['WL']
+        
+        if hasattr(a['MJD'], '__len__'):
+            mjd = np.median( a['MJD'] ) 
+            #print( "here   ---\n\n")
+        else:
+            print("weird that a[MJD] has no length")
+
+        fake_obs_list.append( 
+            pmoired.oifake.makeFakeVLTI(\
+                t= a['telescopes'],\
+                target = ( a['header']['RA']* 24 / 360 , a['header']['DEC'] ),\
+                lst = [a['LST']], \
+                wl = a['WL'], \
+                mjd0 = [mjd], #a[ 'MJD'], #[mjd], #a[ 'MJD'],\
+                cube = cube ) 
+        )
+        # if WARNING:  1 out of 1 LST are not observable! then doesn't append mjd.. hack fix:
+        if  len( fake_obs_list[-1]["MJD"] )==0:
+            fake_obs_list[-1]["MJD"] = [mjd]
+        
+        fake_obs_list[-1]["filename"] = a.get("filename",None) # added so consistent sorting can be done between oi and oif
+
+        try:
+            del mjd
+        except:
+            print("no mjd to delete")
+
+    # makefake does some operation on MJD so still doesn't match.  
+    oif.data = fake_obs_list
+
+    # sort data by MJD - issues with Gravity when x['MJD'] is a list... TO DO 
+    
+    # DO ALL THIS SORTING ON oi BEFORE INPUTING 
+    # oi.data = sorted(oi.data, key=lambda x: x['MJD'][0]) # have to take first one because sometimes a list 
+    
+    # oif.data = sorted(oif.data, key=lambda x: x['MJD'][0])
+    
+    # ## SILLY BUG IN PMOIRED WHERE BASELINE/TRIANGLE KEYS ARE INCONSISTENT (e.g. 'D0C1' then 'C1D0')
+    # ## we fix this here by ordering all relevant keys
+    change_baseline_key_list = ['baselines','OI_VIS2','OI_VIS']
+    change_triangle_key_list = ['triangles','OI_T3']
+    # enforce_ordered_baselines_keys(oi.data, change_baseline_key_list)
+    enforce_ordered_baselines_keys(oif.data, change_baseline_key_list)
+    # enforce_ordered_triangle_keys(oi.data, change_triangle_key_list)
+    enforce_ordered_triangle_keys(oif.data, change_triangle_key_list)
+
+    return( oif )
+
+
+# def build_oif_from_params(oi, theta_o_deg, phi_o_deg, delta_T, theta_ud_mas,
+#                           wavelength_m=1.65e-6, grid_size=500,
+#                           T_eff=3000.0, nu=1/(757*24*3600), psi_T=0.0,
+#                           l=1, m=1, dx_mas=1.0, dy_mas=1.0):
+#     """
+#     Make dipole map - sample on oi - return oif.
+#     """
+#     # spherical grid (not too fine to keep speed)
+#     # th = np.linspace(0, np.pi, 64)
+#     # ph = np.linspace(0, 2*np.pi, 64)
+#     # TH, PH = np.meshgrid(th, ph)
+
+#     # Tloc = thermal_oscillation(TH, PH, 0.0, T_eff, delta_T, l, m, nu, psi_T)
+#     # theta_o = np.deg2rad(theta_o_deg)
+#     # phi_o   = np.deg2rad(phi_o_deg)
+#     # THr, PHr = rotate_to_observer_frame(TH, PH, theta_o, phi_o)
+#     # img = project_to_observer_plane(THr, PHr, blackbody_intensity(Tloc, wavelength_m), grid_size=grid_size)
+
+#     img = thermal_dipole_image( theta_o_deg, phi_o_deg, delta_T,  \
+#                                wavelength_m, grid_size, T_eff, nu, psi_T,l, m)
+    
+#     # build a FITS (in memory) with pixel scale set by UD (so diameter spans ~grid_size px)
+#     pix_mas = theta_ud_mas / grid_size
+#     hdul = intensity_2_fits(img, dx = pix_mas, dy=pix_mas, name="dipole_model.fits", write_file=False)
+    
+#     #intensity_to_fits(img, pix_mas, pix_mas, name="dipole_model.fits", write_file=False)
+
+#     #simulate_obs_from_image_reco( obs_files, image_file , binning=None, insname=None)
+#     oif = simulate_obs_from_image_reco_FAST(oi, hdul, img_pixscl_mas=pix_mas)
+#     return oif
 
 
 
